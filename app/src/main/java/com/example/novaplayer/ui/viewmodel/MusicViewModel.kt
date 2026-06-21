@@ -148,6 +148,7 @@ class MusicViewModel(context: Context) : ViewModel() {
                 if (currentItem != null) {
                     val songId = currentItem.mediaId
                     _failedSongs.value = _failedSongs.value + songId
+                    repository.log("MusicViewModel: Player error for songId: $songId -> ${error.message} (errorCode: ${error.errorCode}, name: ${error.errorCodeName})")
                     viewModelScope.launch(Dispatchers.Main) {
                         android.widget.Toast.makeText(
                             appContext,

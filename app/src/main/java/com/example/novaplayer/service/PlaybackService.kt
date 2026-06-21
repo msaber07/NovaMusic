@@ -30,6 +30,10 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.first
 import java.io.File
+import androidx.media3.datasource.DataSource
+import androidx.media3.datasource.DataSpec
+import androidx.media3.datasource.TransferListener
+import android.net.Uri
 
 class PlaybackService : MediaLibraryService() {
 
@@ -240,33 +244,37 @@ class PlaybackService : MediaLibraryService() {
             val future = SettableFuture.create<MutableList<MediaItem>>()
             serviceScope.launch {
                 val resolvedItems = withContext(Dispatchers.IO) {
-                    mediaItems.map { item ->
+                    val list = mutableListOf<MediaItem>()
+                    for (item in mediaItems) {
                         val uri = item.localConfiguration?.uri?.toString()
                         val isResolved = !uri.isNullOrEmpty()
                         if (isResolved) {
-                            item
+                            list.add(item)
                         } else {
                             val songId = item.mediaId
                             val dbSong = repository.getSongByIdSync(songId)
                             val playUri = if (dbSong?.isDownloaded == true && dbSong.localUri != null) {
+                                repository.log("PlaybackService: Playing downloaded local file: ${dbSong.localUri}")
                                 dbSong.localUri
                             } else {
                                 if (songId.startsWith("yt_")) {
-                                    val videoId = songId.removePrefix("yt_")
-                                    "https://inv.thepixora.com/latest_version?id=$videoId&itag=140&local=true"
+                                    "youtube://$songId"
                                 } else {
                                     ""
                                 }
                             }
                             if (playUri.isNotEmpty()) {
-                                item.buildUpon()
-                                    .setUri(android.net.Uri.parse(playUri))
-                                    .build()
+                                list.add(
+                                    item.buildUpon()
+                                        .setUri(android.net.Uri.parse(playUri))
+                                        .build()
+                                )
                             } else {
-                                item
+                                list.add(item)
                             }
                         }
-                    }.toMutableList()
+                    }
+                    list
                 }
                 future.set(resolvedItems)
             }
@@ -291,15 +299,40 @@ class PlaybackService : MediaLibraryService() {
             .setCache(getCache(this))
             .setUpstreamDataSourceFactory(httpDataSourceFactory)
             .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
+
+        val resolvingDataSourceFactory = ResolvingDataSourceFactory(repository, cacheDataSourceFactory)
             
         val mediaSourceFactory = DefaultMediaSourceFactory(this)
-            .setDataSourceFactory(cacheDataSourceFactory)
+            .setDataSourceFactory(resolvingDataSourceFactory)
 
         player = ExoPlayer.Builder(this)
             .setAudioAttributes(audioAttributes, true)
             .setHandleAudioBecomingNoisy(true)
             .setMediaSourceFactory(mediaSourceFactory)
             .build()
+
+        player?.addListener(object : androidx.media3.common.Player.Listener {
+            override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                repository.log("PlaybackService [EXOPLAYER ERROR]: ${error.message} (errorCode: ${error.errorCode}, name: ${error.errorCodeName})")
+                val cause = error.cause
+                if (cause != null) {
+                    repository.log("  Cause: ${cause.message}")
+                }
+            }
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                val stateName = when(playbackState) {
+                    androidx.media3.common.Player.STATE_IDLE -> "IDLE"
+                    androidx.media3.common.Player.STATE_BUFFERING -> "BUFFERING"
+                    androidx.media3.common.Player.STATE_READY -> "READY"
+                    androidx.media3.common.Player.STATE_ENDED -> "ENDED"
+                    else -> "UNKNOWN"
+                }
+                repository.log("PlaybackService [PLAYBACK STATE]: $stateName")
+            }
+            override fun onMediaItemTransition(mediaItem: androidx.media3.common.MediaItem?, reason: Int) {
+                repository.log("PlaybackService [MEDIA ITEM TRANSITION]: mediaId=${mediaItem?.mediaId}, reason=$reason")
+            }
+        })
 
         val intent = Intent(this, com.example.novaplayer.MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
@@ -340,5 +373,65 @@ class PlaybackService : MediaLibraryService() {
             mediaSession = null
         }
         super.onDestroy()
+    }
+}
+
+@UnstableApi
+class ResolvingDataSource(
+    private val repository: com.example.novaplayer.data.repository.MusicRepository,
+    private val delegate: DataSource
+) : DataSource {
+
+    override fun addTransferListener(transferListener: TransferListener) {
+        delegate.addTransferListener(transferListener)
+    }
+
+    override fun open(dataSpec: DataSpec): Long {
+        val uri = dataSpec.uri
+        val scheme = uri.scheme
+        val resolvedDataSpec = if (scheme == "youtube") {
+            val songId = uri.host ?: uri.lastPathSegment ?: ""
+            repository.log("ResolvingDataSource: Intercepted placeholder URI: $uri, songId: $songId")
+            
+            // Resolve the stream URL synchronously on ExoPlayer's loading background thread
+            val resolvedUrl = kotlinx.coroutines.runBlocking {
+                repository.resolveStreamUrl(songId)
+            }
+            repository.log("ResolvingDataSource: Resolved stream URL: $resolvedUrl")
+            
+            if (resolvedUrl.isNotEmpty()) {
+                dataSpec.buildUpon()
+                    .setUri(Uri.parse(resolvedUrl))
+                    .build()
+            } else {
+                repository.log("ResolvingDataSource: Failed to resolve stream URL for $songId")
+                dataSpec
+            }
+        } else {
+            dataSpec
+        }
+        return delegate.open(resolvedDataSpec)
+    }
+
+    override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
+        return delegate.read(buffer, offset, length)
+    }
+
+    override fun getUri(): Uri? {
+        return delegate.getUri()
+    }
+
+    override fun close() {
+        delegate.close()
+    }
+}
+
+@UnstableApi
+class ResolvingDataSourceFactory(
+    private val repository: com.example.novaplayer.data.repository.MusicRepository,
+    private val delegateFactory: DataSource.Factory
+) : DataSource.Factory {
+    override fun createDataSource(): DataSource {
+        return ResolvingDataSource(repository, delegateFactory.createDataSource())
     }
 }

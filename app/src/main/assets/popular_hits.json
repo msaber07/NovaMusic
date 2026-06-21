@@ -1,0 +1,132 @@
+{
+  "genres": {
+    "pop_tr": [
+      {"title": "Simge - Aşkın Olayım", "artist": "Simge", "query": "Simge Aşkın Olayım"},
+      {"title": "Tarkan - Yolla", "artist": "Tarkan", "query": "Tarkan Yolla"},
+      {"title": "Mabel Matiz & Mert Demir - Antidepresan", "artist": "Mabel Matiz", "query": "Mabel Matiz Mert Demir Antidepresan"},
+      {"title": "Edis - Martılar", "artist": "Edis", "query": "Edis Martılar"},
+      {"title": "Zeynep Bastık - Ara", "artist": "Zeynep Bastık", "query": "Zeynep Bastık Ara"},
+      {"title": "Tarkan - Şımarık", "artist": "Tarkan", "query": "Tarkan Şımarık"},
+      {"title": "Hadise - Düm Tek Tek", "artist": "Hadise", "query": "Hadise Düm Tek Tek"},
+      {"title": "Gülşen - Lolipop", "artist": "Gülşen", "query": "Gülşen Lolipop"},
+      {"title": "Murat Boz - Özledim", "artist": "Murat Boz", "query": "Murat Boz Özledim"},
+      {"title": "Sertab Erener - Everyway That I Can", "artist": "Sertab Erener", "query": "Sertab Erener Everyway That I Can"},
+      {"title": "Kenan Doğulu - Güzeller İçinden", "artist": "Kenan Doğulu", "query": "Kenan Doğulu Güzeller İçinden"},
+      {"title": "Mabel Matiz - Sarışın", "artist": "Mabel Matiz", "query": "Mabel Matiz Sarışın"}
+    ],
+    "rap_tr": [
+      {"title": "Ezhel - Geceler", "artist": "Ezhel", "query": "Ezhel Geceler"},
+      {"title": "Sagopa Kajmer - Galiba", "artist": "Sagopa Kajmer", "query": "Sagopa Kajmer Galiba"},
+      {"title": "Ceza - Yerli Plaka", "artist": "Ceza", "query": "Ceza Yerli Plaka"},
+      {"title": "Uzi - Arasan da", "artist": "Uzi", "query": "Uzi Arasan da"},
+      {"title": "Motive - 10MG", "artist": "Motive", "query": "Motive 10MG"},
+      {"title": "Sefo - Bilmem Mi?", "artist": "Sefo", "query": "Sefo Bilmem Mi?"},
+      {"title": "Sagopa Kajmer - Baytar", "artist": "Sagopa Kajmer", "query": "Sagopa Kajmer Baytar"},
+      {"title": "Ceza - Suspus", "artist": "Ceza", "query": "Ceza Suspus"},
+      {"title": "Ezhel - Felaket", "artist": "Ezhel", "query": "Ezhel Felaket"},
+      {"title": "Çakal - İmdat", "artist": "Çakal", "query": "Çakal İmdat"},
+      {"title": "Sagopa Kajmer & Ceza - Neyim Var Ki", "artist": "Sagopa Kajmer", "query": "Sagopa Kajmer Ceza Neyim Var Ki"}
+    ],
+    "rock_tr": [
+      {"title": "Duman - Senden Daha Güzel", "artist": "Duman", "query": "Duman Senden Daha Güzel"},
+      {"title": "Mor ve Ötesi - Bir Derdim Var", "artist": "Mor ve Ötesi", "query": "Mor ve Ötesi Bir Derdim Var"},
+      {"title": "manga - Cevapsız Sorular", "artist": "manga", "query": "manga Cevapsız Sorular"},
+      {"title": "Athena - Kafama Göre", "artist": "Athena", "query": "Athena Kafama Göre"},
+      {"title": "Teoman - Paramparça", "artist": "Teoman", "query": "Teoman Paramparça"},
+      {"title": "Duman - Bu Akşam", "artist": "Duman", "query": "Duman Bu Akşam"},
+      {"title": "Mor ve Ötesi - Cambaz", "artist": "Mor ve Ötesi", "query": "Mor ve Ötesi Cambaz"},
+      {"title": "manga - Bir Kadın Çizeceksin", "artist": "manga", "query": "manga Bir Kadın Çizeceksin"},
+      {"title": "Haluk Levent - Elfida", "artist": "Haluk Levent", "query": "Haluk Levent Elfida"},
+      {"title": "Şebnem Ferah - Sil Baştan", "artist": "Şebnem Ferah", "query": "Şebnem Ferah Sil Baştan"},
+      {"title": "Dolu Kadehi Ters Tut - Gitme", "artist": "Dolu Kadehi Ters Tut", "query": "Dolu Kadehi Ters Tut Gitme"}
+    ],
+    "pop_global": [
+      {"title": "Taylor Swift - Cruel Summer", "artist": "Taylor Swift", "query": "Taylor Swift Cruel Summer"},
+      {"title": "Billie Eilish - Bad Guy", "artist": "Billie Eilish", "query": "Billie Eilish Bad Guy"},
+      {"title": "The Weeknd - Blinding Lights", "artist": "The Weeknd", "query": "The Weeknd Blinding Lights"},
+      {"title": "Dua Lipa - Levitating", "artist": "Dua Lipa", "query": "Dua Lipa Levitating"},
+      {"title": "Harry Styles - As It Was", "artist": "Harry Styles", "query": "Harry Styles As It Was"},
+      {"title": "Ed Sheeran - Shape of You", "artist": "Ed Sheeran", "query": "Ed Sheeran Shape of You"},
+      {"title": "Adele - Rolling in the Deep", "artist": "Adele", "query": "Adele Rolling in the Deep"},
+      {"title": "Bruno Mars - Uptown Funk", "artist": "Bruno Mars", "query": "Bruno Mars Uptown Funk"}
+    ],
+    "rap_global": [
+      {"title": "Eminem - Lose Yourself", "artist": "Eminem", "query": "Eminem Lose Yourself"},
+      {"title": "Drake - Hotline Bling", "artist": "Drake", "query": "Drake Hotline Bling"},
+      {"title": "Travis Scott - Goosebumps", "artist": "Travis Scott", "query": "Travis Scott Goosebumps"},
+      {"title": "Kendrick Lamar - Humble", "artist": "Kendrick Lamar", "query": "Kendrick Lamar Humble"},
+      {"title": "Eminem - Without Me", "artist": "Eminem", "query": "Eminem Without Me"},
+      {"title": "Post Malone - Sunflower", "artist": "Post Malone", "query": "Post Malone Sunflower"},
+      {"title": "Coolio - Gangsta's Paradise", "artist": "Coolio", "query": "Coolio Gangsta's Paradise"}
+    ],
+    "rock_global": [
+      {"title": "Queen - Bohemian Rhapsody", "artist": "Queen", "query": "Queen Bohemian Rhapsody"},
+      {"title": "Coldplay - Yellow", "artist": "Coldplay", "query": "Coldplay Yellow"},
+      {"title": "Linkin Park - In The End", "artist": "Linkin Park", "query": "Linkin Park In The End"},
+      {"title": "Nirvana - Smells Like Teen Spirit", "artist": "Nirvana", "query": "Nirvana Smells Like Teen Spirit"},
+      {"title": "Imagine Dragons - Believer", "artist": "Imagine Dragons", "query": "Imagine Dragons Believer"},
+      {"title": "AC/DC - Back In Black", "artist": "AC/DC", "query": "AC/DC Back In Black"},
+      {"title": "Queen - We Will Rock You", "artist": "Queen", "query": "Queen We Will Rock You"},
+      {"title": "Bon Jovi - It's My Life", "artist": "Bon Jovi", "query": "Bon Jovi It's My Life"}
+    ]
+  },
+  "artists": {
+    "manifest": [
+      {"title": "manifest - Daha İyi", "query": "manifest Daha İyi"},
+      {"title": "manifest - Zamansızlık", "query": "manifest Zamansızlık"},
+      {"title": "manifest - KTS", "query": "manifest KTS"},
+      {"title": "manifest - Manifest", "query": "manifest Manifest"}
+    ],
+    "tarkan": [
+      {"title": "Tarkan - Şımarık", "query": "Tarkan Şımarık"},
+      {"title": "Tarkan - Dudu", "query": "Tarkan Dudu"},
+      {"title": "Tarkan - Kuzu Kuzu", "query": "Tarkan Kuzu Kuzu"},
+      {"title": "Tarkan - Yolla", "query": "Tarkan Yolla"},
+      {"title": "Tarkan - Adımı Kalbine Yaz", "query": "Tarkan Adımı Kalbine Yaz"}
+    ],
+    "sezen aksu": [
+      {"title": "Sezen Aksu - Yalnızlık Senfonisi", "query": "Sezen Aksu Yalnızlık Senfonisi"},
+      {"title": "Sezen Aksu - Her Şeyi Yak", "query": "Sezen Aksu Her Şeyi Yak"},
+      {"title": "Sezen Aksu - Firuze", "query": "Sezen Aksu Firuze"},
+      {"title": "Sezen Aksu - Tükeneceğiz", "query": "Sezen Aksu Tükeneceğiz"},
+      {"title": "Sezen Aksu - Belalım", "query": "Sezen Aksu Belalım"}
+    ],
+    "duman": [
+      {"title": "Duman - Senden Daha Güzel", "query": "Duman Senden Daha Güzel"},
+      {"title": "Duman - Bu Akşam", "query": "Duman Bu Akşam"},
+      {"title": "Duman - Aman Aman", "query": "Duman Aman Aman"},
+      {"title": "Duman - Helal Olsun", "query": "Duman Helal Olsun"},
+      {"title": "Duman - Bal", "query": "Duman Bal"}
+    ],
+    "edis": [
+      {"title": "Edis - Martılar", "query": "Edis Martılar"},
+      {"title": "Edis - Çok Çok", "query": "Edis Çok Çok"},
+      {"title": "Edis - Arıyorum", "query": "Edis Arıyorum"}
+    ],
+    "ezhel": [
+      {"title": "Ezhel - Geceler", "query": "Ezhel Geceler"},
+      {"title": "Ezhel - Felaket", "query": "Ezhel Felaket"},
+      {"title": "Ezhel - Alo", "query": "Ezhel Alo"}
+    ],
+    "sagopa kajmer": [
+      {"title": "Sagopa Kajmer - Galiba", "query": "Sagopa Kajmer Galiba"},
+      {"title": "Sagopa Kajmer - Baytar", "query": "Sagopa Kajmer Baytar"},
+      {"title": "Sagopa Kajmer - 366.Gün", "query": "Sagopa Kajmer 366.Gün"}
+    ],
+    "ceza": [
+      {"title": "Ceza - Yerli Plaka", "query": "Ceza Yerli Plaka"},
+      {"title": "Ceza - Suspus", "query": "Ceza Suspus"},
+      {"title": "Ceza - Holocaust", "query": "Ceza Holocaust"}
+    ],
+    "mabel matiz": [
+      {"title": "Mabel Matiz - Antidepresan", "query": "Mabel Matiz Antidepresan"},
+      {"title": "Mabel Matiz - Fırtınadayım", "query": "Mabel Matiz Fırtınadayım"},
+      {"title": "Mabel Matiz - Sarışın", "query": "Mabel Matiz Sarışın"}
+    ],
+    "manga": [
+      {"title": "manga - Cevapsız Sorular", "query": "manga Cevapsız Sorular"},
+      {"title": "manga - Bir Kadın Çizeceksin", "query": "manga Bir Kadın Çizeceksin"},
+      {"title": "manga - Dursun Zaman", "query": "manga Dursun Zaman"}
+    ]
+  }
+}
