@@ -21,14 +21,22 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
-import com.ar.youtubeextractor.core.YouTubeExtractor
-import com.ar.youtubeextractor.core.onSuccess
-import com.ar.youtubeextractor.core.onError
+import com.yushosei.newpipe.extractor.NewPipe
+import com.yushosei.newpipe.extractor.ServiceList
+import com.yushosei.newpipe.extractor.stream.AudioStream
+import com.yushosei.newpipe.util.DefaultDownloaderImpl
 import java.io.File
 import java.io.FileOutputStream
 import java.util.UUID
 
 class MusicRepository(private val context: Context) {
+
+    companion object {
+        @Volatile
+        private var isNewPipeInitialized = false
+        
+        val resolutionStatus = kotlinx.coroutines.flow.MutableStateFlow("")
+    }
 
     private val db = MusicDatabase.getDatabase(context)
     private val dao = db.musicDao()
@@ -106,6 +114,64 @@ class MusicRepository(private val context: Context) {
         })
         .build()
 
+    // Local search helper using NewPipe Extractor
+    private suspend fun searchNewPipe(query: String): List<SongEntity> = withContext(Dispatchers.IO) {
+        try {
+            if (!isNewPipeInitialized) {
+                log("Initializing NewPipe for search...")
+                NewPipe.init(DefaultDownloaderImpl.initDefault())
+                isNewPipeInitialized = true
+            }
+            log("Searching NewPipe locally for query: $query")
+            val searchInfo = com.yushosei.newpipe.util.ExtractorHelper.searchFor(
+                ServiceList.YouTube.serviceId,
+                query,
+                emptyList(),
+                ""
+            )
+            val relatedItems = searchInfo.relatedItems as? List<*> ?: return@withContext emptyList()
+            val songs = mutableListOf<SongEntity>()
+            for (item in relatedItems) {
+                if (item is com.yushosei.newpipe.extractor.stream.StreamInfoItem) {
+                    val url = item.url
+                    val videoId = if (url.contains("v=")) {
+                        url.substringAfter("v=").substringBefore("&")
+                    } else if (url.contains("youtu.be/")) {
+                        url.substringAfter("youtu.be/").substringBefore("?")
+                    } else {
+                        continue
+                    }
+                    
+                    val title = item.name
+                    val author = item.uploaderName ?: "Unknown Author"
+                    val lengthSeconds = item.duration
+                    
+                    val songId = "yt_$videoId"
+                    val localSong = dao.getSongById(songId)
+                    songs.add(
+                        SongEntity(
+                            id = songId,
+                            title = title,
+                            artistName = author,
+                            audioUrl = "",
+                            durationSeconds = lengthSeconds.toInt(),
+                            albumImageUrl = "https://img.youtube.com/vi/$videoId/hqdefault.jpg",
+                            isDownloaded = localSong?.isDownloaded ?: false,
+                            localUri = localSong?.localUri,
+                            isFavorite = localSong?.isFavorite ?: false
+                        )
+                    )
+                }
+            }
+            log("NewPipe search found ${songs.size} results.")
+            return@withContext songs
+        } catch (e: Exception) {
+            log("NewPipe search failed: ${e.message}")
+            e.printStackTrace()
+            return@withContext emptyList()
+        }
+    }
+
     // Online Search
     fun searchTracks(query: String): Flow<List<SongEntity>> = flow {
         if (query.isBlank()) {
@@ -113,6 +179,20 @@ class MusicRepository(private val context: Context) {
             return@flow
         }
         
+        // 1. Try NewPipe Extractor search first
+        try {
+            val localSongs = searchNewPipe(query)
+            if (localSongs.isNotEmpty()) {
+                emit(localSongs)
+                return@flow
+            }
+        } catch (e: Exception) {
+            log("Error doing NewPipe search, falling back: ${e.message}")
+            e.printStackTrace()
+        }
+        
+        // 2. Fallback to Invidious
+        log("Falling back to Invidious for search query: $query")
         val instances = listOf(
             "https://inv.thepixora.com",
             "https://invidious.nerdvpn.de",
@@ -233,150 +313,155 @@ class MusicRepository(private val context: Context) {
 
     suspend fun resolveStreamUrl(songId: String): String = withContext(Dispatchers.IO) {
         log("Resolving stream URL for songId: $songId")
-        if (!songId.startsWith("yt_")) {
-            log("  songId does not start with yt_")
-            return@withContext ""
-        }
-        val videoId = songId.removePrefix("yt_")
-        
-        // 1. Try local client YouTubeExtractor first
-        val useLocalExtractor = false // Disabled due to YouTube signature changes causing 25s timeout/empty formats
-        var extractedUrl: String? = null
-        if (useLocalExtractor) {
-            val videoUrl = "https://www.youtube.com/watch?v=$videoId"
-            log("  Attempting local YouTubeExtractor extraction for URL: $videoUrl")
-            val clientTypes = listOf("web", "android", "mweb", "ios")
+        resolutionStatus.value = "Çözümleniyor..."
+        try {
+            if (!songId.startsWith("yt_")) {
+                log("  songId does not start with yt_")
+                return@withContext ""
+            }
+            val videoId = songId.removePrefix("yt_")
             
-            for (clientType in clientTypes) {
-                log("  Trying YouTubeExtractor with client type: $clientType")
-                try {
-                    val extractor = YouTubeExtractor()
-                    val result = extractor.extractVideoData(videoUrl, clientType)
-                    result.onSuccess { videoData ->
-                        log("    Local extraction succeeded for client $clientType!")
-                        val formats = videoData.streamingData?.adaptiveFormats ?: emptyList()
-                        log("    Found ${formats.size} adaptive formats")
-                        
-                        // Try to find the best audio-only format (e.g. m4a itag 140, opus itag 251, or any audio-only format)
-                        val audioFormat = formats.find { it.isAudioOnly && it.itag == 140 }
-                            ?: formats.find { it.isAudioOnly && it.itag == 251 }
-                            ?: formats.find { it.isAudioOnly }
-                        
-                        if (audioFormat != null) {
-                            extractedUrl = audioFormat.url
-                            log("    Selected audio format: itag=${audioFormat.itag}, url=${audioFormat.url?.take(60)}...")
-                        } else {
-                            log("    No audio-only format found, trying multiplexed formats...")
-                            val muxedFormat = videoData.streamingData?.formats?.find { it.url != null }
-                            extractedUrl = muxedFormat?.url
-                            log("    Selected muxed format: itag=${muxedFormat?.itag}, url=${muxedFormat?.url?.take(60)}...")
-                        }
-                    }.onError { error ->
-                        log("    Local extraction failed for client $clientType with error: $error")
-                    }
-                } catch (e: Exception) {
-                    log("    Exception during local extraction for client $clientType: ${e.message}")
-                    e.printStackTrace()
+            // 1. Try NewPipe Extractor first
+            try {
+                if (!isNewPipeInitialized) {
+                    log("  Initializing NewPipe Extractor...")
+                    resolutionStatus.value = "Sistem hazırlanıyor..."
+                    NewPipe.init(DefaultDownloaderImpl.initDefault())
+                    isNewPipeInitialized = true
+                    log("  NewPipe Extractor initialized successfully.")
                 }
+            } catch (e: Exception) {
+                log("  NewPipe Extractor initialization failed: ${e.message}")
+                e.printStackTrace()
+            }
+
+            var extractedUrl: String? = null
+            log("  Attempting NewPipe extraction for videoId: $videoId")
+            resolutionStatus.value = "YouTube'dan çözümleniyor..."
+            try {
+                val service = ServiceList.YouTube
+                val extractor = service.getStreamExtractor("https://www.youtube.com/watch?v=$videoId")
+                extractor.fetchPage()
                 
-                if (!extractedUrl.isNullOrBlank()) {
-                    break
-                }
-            }
-        }
-        
-        if (!extractedUrl.isNullOrBlank()) {
-            log("  Successfully resolved via local YouTubeExtractor: $extractedUrl")
-            return@withContext extractedUrl!!
-        }
-        
-        // 2. Try active cached base URL first as fallback
-        log("  Local extractor failed/not found. Trying active cached Invidious URL...")
-        val activeUrl = activeInvidiousBaseUrl
-        val activeStreamUrl = "$activeUrl/latest_version?id=$videoId&itag=140&local=true"
-        if (checkUrlWorks(activeStreamUrl)) {
-            log("  Successfully resolved with active cached URL: $activeStreamUrl")
-            return@withContext activeStreamUrl
-        }
-        
-        // 3. Probe other invidious instances in parallel!
-        log("  Active URL failed. Probing other Invidious instances in parallel...")
-        val workingBase = coroutineScope {
-            val deferreds = invidiousInstances.map { base ->
-                async {
-                    if (base == activeUrl) null
-                    else {
-                        val candidateUrl = "$base/latest_version?id=$videoId&itag=140&local=true"
-                        if (checkUrlWorks(candidateUrl)) base else null
+                val audioStreams = extractor.audioStreams()
+                log("    NewPipe found ${audioStreams?.size ?: 0} audio streams")
+                if (!audioStreams.isNullOrEmpty()) {
+                    for (audio in audioStreams) {
+                        log("      Stream: format=${audio.format}, bitrate=${audio.bitrate}, url=${audio.getUrl()?.take(30)}...")
                     }
+                    val bestAudio = audioStreams.find { it.format?.suffix?.lowercase() == "m4a" }
+                        ?: audioStreams.find { it.format?.name?.lowercase() == "m4a" }
+                        ?: audioStreams.find { it.format?.suffix?.lowercase() == "webm" }
+                        ?: audioStreams.first()
+                    
+                    extractedUrl = bestAudio.getUrl()
+                    log("    Selected NewPipe stream: format=${bestAudio.format}, bitrate=${bestAudio.bitrate}")
+                } else {
+                    log("    No audio streams found via NewPipe Extractor.")
                 }
+            } catch (e: Exception) {
+                log("    Exception during NewPipe extraction: ${e.message}")
+                e.printStackTrace()
             }
-            deferreds.map { it.await() }.firstOrNull { it != null }
-        }
-        
-        if (workingBase != null) {
-            activeInvidiousBaseUrl = workingBase
-            val resolvedUrl = "$workingBase/latest_version?id=$videoId&itag=140&local=true"
-            log("  Successfully resolved with parallel Invidious check: $resolvedUrl")
-            return@withContext resolvedUrl
-        }
-        
-        // 4. Fallback: try Cobalt APIs in parallel if all Invidious instances fail
-        log("  All Invidious instances failed. Trying Cobalt in parallel...")
-        val cobaltApis = listOf(
-            "https://rue-cobalt.xenon.zone/",
-            "https://cobaltapi.kittycat.boo/"
-        )
-        val cobaltStreamUrl = coroutineScope {
-            val deferreds = cobaltApis.map { api ->
-                async {
-                    try {
-                        val mediaType = "application/json; charset=utf-8".toMediaTypeOrNull()
-                        val jsonBody = """{"url":"https://www.youtube.com/watch?v=$videoId","downloadMode":"audio","audioFormat":"mp3"}"""
-                        val requestBody = jsonBody.toRequestBody(mediaType)
-                        val request = Request.Builder()
-                            .url(api)
-                            .post(requestBody)
-                            .header("Accept", "application/json")
-                            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
-                            .build()
-                        
-                        val tempClient = okHttpClient.newBuilder()
-                            .connectTimeout(3000, java.util.concurrent.TimeUnit.MILLISECONDS)
-                            .readTimeout(3000, java.util.concurrent.TimeUnit.MILLISECONDS)
-                            .build()
-                            
-                        tempClient.newCall(request).execute().use { response ->
-                            log("  Cobalt request to $api -> code: ${response.code}")
-                            if (response.isSuccessful) {
-                                val bodyStr = response.body?.string() ?: ""
-                                val json = com.google.gson.JsonParser().parse(bodyStr).asJsonObject
-                                val status = json.get("status")?.asString ?: ""
-                                val streamUrl = json.get("url")?.asString ?: ""
-                                log("    Cobalt response -> status: $status, streamUrl length: ${streamUrl.length}")
-                                if ((status == "tunnel" || status == "stream" || status == "redirect" || status == "success") && streamUrl.isNotEmpty()) {
-                                    streamUrl
-                                } else null
-                            } else null
+            
+            if (!extractedUrl.isNullOrBlank()) {
+                log("  Successfully resolved via NewPipe: $extractedUrl")
+                return@withContext extractedUrl!!
+            }
+            
+            // 2. Try active cached base URL first as fallback
+            log("  Local extractor failed/not found. Trying active cached Invidious URL...")
+            resolutionStatus.value = "Alternatif sunucu aranıyor..."
+            val activeUrl = activeInvidiousBaseUrl
+            val activeStreamUrl = "$activeUrl/latest_version?id=$videoId&itag=140&local=true"
+            if (checkUrlWorks(activeStreamUrl)) {
+                log("  Successfully resolved with active cached URL: $activeStreamUrl")
+                return@withContext activeStreamUrl
+            }
+            
+            // 3. Probe other invidious instances in parallel!
+            log("  Active URL failed. Probing other Invidious instances in parallel...")
+            resolutionStatus.value = "Sunucular taranıyor..."
+            val workingBase = coroutineScope {
+                val deferreds = invidiousInstances.map { base ->
+                    async {
+                        if (base == activeUrl) null
+                        else {
+                            val candidateUrl = "$base/latest_version?id=$videoId&itag=140&local=true"
+                            if (checkUrlWorks(candidateUrl)) base else null
                         }
-                    } catch (e: Exception) {
-                        log("    Cobalt request to $api failed: ${e.message}")
-                        null
                     }
                 }
+                deferreds.map { it.await() }.firstOrNull { it != null }
             }
-            deferreds.map { it.await() }.firstOrNull { it != null }
+            
+            if (workingBase != null) {
+                activeInvidiousBaseUrl = workingBase
+                val resolvedUrl = "$workingBase/latest_version?id=$videoId&itag=140&local=true"
+                log("  Successfully resolved with parallel Invidious check: $resolvedUrl")
+                return@withContext resolvedUrl
+            }
+            
+            // 4. Fallback: try Cobalt APIs in parallel if all Invidious instances fail
+            log("  All Invidious instances failed. Trying Cobalt in parallel...")
+            resolutionStatus.value = "Yedek tünel kuruluyor..."
+            val cobaltApis = listOf(
+                "https://rue-cobalt.xenon.zone/",
+                "https://cobaltapi.kittycat.boo/"
+            )
+            val cobaltStreamUrl = coroutineScope {
+                val deferreds = cobaltApis.map { api ->
+                    async {
+                        try {
+                            val mediaType = "application/json; charset=utf-8".toMediaTypeOrNull()
+                            val jsonBody = """{"url":"https://www.youtube.com/watch?v=$videoId","downloadMode":"audio","audioFormat":"mp3"}"""
+                            val requestBody = jsonBody.toRequestBody(mediaType)
+                            val request = Request.Builder()
+                                .url(api)
+                                .post(requestBody)
+                                .header("Accept", "application/json")
+                                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
+                                .build()
+                            
+                            val tempClient = okHttpClient.newBuilder()
+                                .connectTimeout(3000, java.util.concurrent.TimeUnit.MILLISECONDS)
+                                .readTimeout(3000, java.util.concurrent.TimeUnit.MILLISECONDS)
+                                .build()
+                            
+                            tempClient.newCall(request).execute().use { response ->
+                                log("  Cobalt request to $api -> code: ${response.code}")
+                                if (response.isSuccessful) {
+                                    val bodyStr = response.body?.string() ?: ""
+                                    val json = com.google.gson.JsonParser().parse(bodyStr).asJsonObject
+                                    val status = json.get("status")?.asString ?: ""
+                                    val streamUrl = json.get("url")?.asString ?: ""
+                                    log("    Cobalt response -> status: $status, streamUrl length: ${streamUrl.length}")
+                                    if ((status == "tunnel" || status == "stream" || status == "redirect" || status == "success") && streamUrl.isNotEmpty()) {
+                                        streamUrl
+                                    } else null
+                                } else null
+                            }
+                        } catch (e: Exception) {
+                            log("    Cobalt request to $api failed: ${e.message}")
+                            null
+                        }
+                    }
+                }
+                deferreds.map { it.await() }.firstOrNull { it != null }
+            }
+            
+            if (cobaltStreamUrl != null) {
+                log("  Successfully resolved with Cobalt: $cobaltStreamUrl")
+                return@withContext cobaltStreamUrl
+            }
+            
+            // Final fallback: return the original default URL
+            val fallbackUrl = "https://inv.thepixora.com/latest_version?id=$videoId&itag=140&local=true"
+            log("  All methods failed! Returning final fallback URL: $fallbackUrl")
+            return@withContext fallbackUrl
+        } finally {
+            resolutionStatus.value = ""
         }
-        
-        if (cobaltStreamUrl != null) {
-            log("  Successfully resolved with Cobalt: $cobaltStreamUrl")
-            return@withContext cobaltStreamUrl
-        }
-        
-        // Final fallback: return the original default URL
-        val fallbackUrl = "https://inv.thepixora.com/latest_version?id=$videoId&itag=140&local=true"
-        log("  All methods failed! Returning final fallback URL: $fallbackUrl")
-        return@withContext fallbackUrl
     }
 
     private fun searchInvidiousSync(base: String, query: String): List<SongEntity> {
@@ -428,6 +513,49 @@ class MusicRepository(private val context: Context) {
         if (!songId.startsWith("yt_")) return@withContext emptyList()
         val videoId = songId.removePrefix("yt_")
         
+        var author: String? = null
+        val tags = mutableListOf<String>()
+        var songTitle = ""
+        
+        // 1. Try local extraction of metadata using NewPipe
+        try {
+            if (!isNewPipeInitialized) {
+                log("Initializing NewPipe for getRecommendedVideos...")
+                NewPipe.init(DefaultDownloaderImpl.initDefault())
+                isNewPipeInitialized = true
+            }
+            log("Fetching local metadata for recommendations, videoId: $videoId")
+            val streamInfo = com.yushosei.newpipe.util.ExtractorHelper.getStreamInfo(
+                ServiceList.YouTube.serviceId,
+                "https://www.youtube.com/watch?v=$videoId",
+                false
+            )
+            author = streamInfo.uploaderName
+            songTitle = streamInfo.name
+            val localTags = streamInfo.tags
+            if (localTags.isNotEmpty()) {
+                for (tag in localTags) {
+                    tags.add(tag.lowercase(java.util.Locale.ROOT))
+                }
+            }
+            log("Locally resolved uploader: $author, title: $songTitle, tags count: ${tags.size}")
+        } catch (e: Exception) {
+            log("Failed to resolve metadata locally: ${e.message}")
+            e.printStackTrace()
+        }
+        
+        // Try DB if local uploader/title is blank
+        if (songTitle.isBlank() || author.isNullOrBlank()) {
+            val dbSong = dao.getSongById(songId)
+            if (dbSong != null) {
+                if (songTitle.isBlank()) songTitle = dbSong.title
+                if (author.isNullOrBlank()) author = dbSong.artistName
+            }
+        }
+
+        val recommendedList = mutableListOf<SongEntity>()
+        
+        // 2. Try Invidious to get direct recommended videos list
         val instances = listOf(
             "https://inv.thepixora.com",
             "https://invidious.nerdvpn.de",
@@ -436,6 +564,7 @@ class MusicRepository(private val context: Context) {
             "https://yewtu.be"
         )
         
+        var invidiousSuccess = false
         for (base in instances) {
             try {
                 val url = "$base/api/v1/videos/$videoId"
@@ -443,85 +572,34 @@ class MusicRepository(private val context: Context) {
                     .url(url)
                     .build()
                 
-                val response = okHttpClient.newCall(request).execute()
+                val tempClient = okHttpClient.newBuilder()
+                    .connectTimeout(3000, java.util.concurrent.TimeUnit.MILLISECONDS)
+                    .readTimeout(3000, java.util.concurrent.TimeUnit.MILLISECONDS)
+                    .build()
+                
+                val response = tempClient.newCall(request).execute()
                 if (response.isSuccessful) {
                     val bodyStr = response.body?.string() ?: continue
                     val jsonObj = com.google.gson.JsonParser().parse(bodyStr).asJsonObject
                     
-                    // Extract author and tags (keywords)
-                    val author = jsonObj.get("author")?.let { if (it.isJsonNull) null else it.getAsString() }
-                    val keywordsJson = jsonObj.get("keywords")
-                    val tags = mutableListOf<String>()
-                    if (keywordsJson != null && keywordsJson.isJsonArray) {
-                        val arr = keywordsJson.asJsonArray
-                        for (j in 0 until arr.size()) {
-                            val tag = arr.get(j)?.let { if (it.isJsonNull) null else it.getAsString() }
-                            if (tag != null) {
-                                tags.add(tag.lowercase(java.util.Locale.ROOT))
+                    // Extract author and tags from Invidious if local failed
+                    if (author.isNullOrBlank()) {
+                        author = jsonObj.get("author")?.let { if (it.isJsonNull) null else it.getAsString() }
+                    }
+                    if (tags.isEmpty()) {
+                        val keywordsJson = jsonObj.get("keywords")
+                        if (keywordsJson != null && keywordsJson.isJsonArray) {
+                            val arr = keywordsJson.asJsonArray
+                            for (j in 0 until arr.size()) {
+                                val tag = arr.get(j)?.let { if (it.isJsonNull) null else it.getAsString() }
+                                if (tag != null) {
+                                    tags.add(tag.lowercase(java.util.Locale.ROOT))
+                                }
                             }
                         }
                     }
                     
-                    // Detect genre and language
-                    val genreMappings = mapOf(
-                        "pop" to "pop music",
-                        "girlband" to "pop music",
-                        "girl group" to "pop music",
-                        "boyband" to "pop music",
-                        "kpop" to "kpop music",
-                        "rock" to "rock music",
-                        "metal" to "metal music",
-                        "punk" to "rock music",
-                        "rap" to "rap music",
-                        "hip hop" to "hip hop music",
-                        "drill" to "rap music",
-                        "trap" to "trap music",
-                        "r&b" to "r&b music",
-                        "jazz" to "jazz music",
-                        "classical" to "classical music",
-                        "electronic" to "electronic music",
-                        "dance" to "dance music",
-                        "house" to "house music",
-                        "techno" to "techno music",
-                        "edm" to "edm music",
-                        "indie" to "indie music",
-                        "alternative" to "alternative music",
-                        "country" to "country music",
-                        "folk" to "folk music",
-                        "lofi" to "lofi hip hop",
-                        "chill" to "lofi hip hop"
-                    )
-                    
-                    val isTurkish = tags.any { tag -> tag.any { c -> c == 'ı' || c == 'ş' || c == 'ğ' || c == 'ü' || c == 'ö' || c == 'ç' } }
-                    
-                    val matchedKey = genreMappings.keys.find { key -> tags.any { tag -> tag.contains(key) } }
-                    val mappedGenre = matchedKey?.let { genreMappings[it] }
-                    
-                    val genreQuery = if (!mappedGenre.isNullOrEmpty()) {
-                        if (isTurkish && mappedGenre == "pop music") {
-                            "popüler türkçe pop"
-                        } else if (isTurkish && (mappedGenre == "rap music" || mappedGenre == "hip hop music" || mappedGenre == "trap music")) {
-                            "popüler türkçe rap"
-                        } else {
-                            "popular $mappedGenre"
-                        }
-                    } else {
-                        if (isTurkish) "popüler türkçe müzik" else "popular music"
-                    }
-                    
-                    val artistQuery = if (!author.isNullOrEmpty() && author != "Unknown Author" && author != "Unknown") {
-                        val lowerAuthor = author.lowercase(java.util.Locale.ROOT)
-                        val qualifiers = listOf("music", "müzik", "video", "song", "şarkı", "band", "grubu", "group", "girlband", "boyband", "live", "concert", "albüm", "album")
-                        val qualifiedTag = tags.find { tag ->
-                            tag.contains(lowerAuthor) && qualifiers.any { q -> tag.contains(q) } && !tag.contains("reaction") && !tag.contains("cover")
-                        }
-                        qualifiedTag ?: (if (isTurkish) "$author şarkıları" else "$author songs")
-                    } else {
-                        ""
-                    }
-                    
                     // Parse direct recommended videos
-                    val recommendedList = mutableListOf<SongEntity>()
                     val recommendedJson = jsonObj.get("recommendedVideos")
                     if (recommendedJson != null && recommendedJson.isJsonArray) {
                         val jsonArray = recommendedJson.asJsonArray
@@ -531,6 +609,10 @@ class MusicRepository(private val context: Context) {
                             val title = dto.get("title")?.let { if (it.isJsonNull) null else it.getAsString() } ?: "Unknown Title"
                             val artist = dto.get("author")?.let { if (it.isJsonNull) null else it.getAsString() } ?: "Unknown Author"
                             val lengthSeconds = dto.get("lengthSeconds")?.let { if (it.isJsonNull) 0 else it.getAsInt() } ?: 0
+                            
+                            if (isSameSongTitle(title, songTitle, author)) {
+                                continue
+                            }
                             
                             val recSongId = "yt_$recVideoId"
                             val localSong = dao.getSongById(recSongId)
@@ -549,162 +631,235 @@ class MusicRepository(private val context: Context) {
                             )
                         }
                     }
-
-                    // Fetch artist songs and genre popular songs using curated popular hits database
-                    loadPopularHits()
-                    
-                    val (artistSongs, genreSongs) = coroutineScope {
-                        // 1. Get artist queries from database if available
-                        val dbArtistSongsDeferred = async {
-                            val queries = mutableListOf<String>()
-                            if (!author.isNullOrEmpty() && author != "Unknown Author" && author != "Unknown") {
-                                val lowerAuthor = author.lowercase(java.util.Locale.ROOT)
-                                val artistsObj = popularHits?.getAsJsonObject("artists")
-                                if (artistsObj != null) {
-                                    val matchedKey = artistsObj.keySet().find { key ->
-                                        lowerAuthor.contains(key) || key.contains(lowerAuthor)
-                                    }
-                                    if (matchedKey != null) {
-                                        val arr = artistsObj.getAsJsonArray(matchedKey)
-                                        for (j in 0 until arr.size()) {
-                                            val obj = arr.get(j).asJsonObject
-                                            obj.get("query")?.asString?.let { queries.add(it) }
-                                        }
-                                    }
-                                }
-                            }
-                            
-                            // Query them in parallel
-                            val results = queries.map { q ->
-                                async { searchInvidiousSync(base, q).firstOrNull() }
-                            }.mapNotNull { it.await() }
-                            
-                            // If we didn't find enough or didn't have any queries, fall back to keyword search
-                            if (results.size < 3 && !artistQuery.isEmpty()) {
-                                val fallback = searchInvidiousSync(base, artistQuery)
-                                (results + fallback).distinctBy { it.id }
-                            } else {
-                                results
-                            }
-                        }
-                        
-                        // 2. Get genre queries from database if available
-                        val dbGenreSongsDeferred = async {
-                            val queries = mutableListOf<String>()
-                            val genresObj = popularHits?.getAsJsonObject("genres")
-                            if (genresObj != null && !mappedGenre.isNullOrEmpty()) {
-                                val genreKey = when {
-                                    mappedGenre.contains("pop") -> if (isTurkish) "pop_tr" else "pop_global"
-                                    mappedGenre.contains("rap") || mappedGenre.contains("hip hop") || mappedGenre.contains("trap") -> if (isTurkish) "rap_tr" else "rap_global"
-                                    mappedGenre.contains("rock") || mappedGenre.contains("metal") || mappedGenre.contains("alternative") -> if (isTurkish) "rock_tr" else "rock_global"
-                                    else -> null
-                                }
-                                if (genreKey != null && genresObj.has(genreKey)) {
-                                    val arr = genresObj.getAsJsonArray(genreKey)
-                                    val list = mutableListOf<String>()
-                                    for (j in 0 until arr.size()) {
-                                        val obj = arr.get(j).asJsonObject
-                                        obj.get("query")?.asString?.let { list.add(it) }
-                                    }
-                                    list.shuffle()
-                                    queries.addAll(list.take(8))
-                                }
-                            }
-                            
-                            // Query them in parallel
-                            val results = queries.map { q ->
-                                async { searchInvidiousSync(base, q).firstOrNull() }
-                            }.mapNotNull { it.await() }
-                            
-                            // If we didn't find enough or didn't have any queries, fall back to keyword search
-                            if (results.size < 5 && !genreQuery.isEmpty()) {
-                                val fallback = searchInvidiousSync(base, genreQuery)
-                                (results + fallback).distinctBy { it.id }
-                            } else {
-                                results
-                            }
-                        }
-                        
-                        Pair(dbArtistSongsDeferred.await(), dbGenreSongsDeferred.await())
-                    }
-                    
-                    // Mixing and Deduplication logic matching User's requested ratio:
-                    // 50% Genre, 35% Artist, 15% Related
-                    val finalSongs = mutableListOf<SongEntity>()
-                    val seenIds = mutableSetOf<String>()
-                    seenIds.add(songId) // skip seed song
-                    
-                    // Setup indices
-                    var recIdx = 0
-                    var artIdx = 0
-                    var genIdx = 0
-                    
-                    // We target 15 songs.
-                    // The distribution:
-                    // - Genre: 8 songs
-                    // - Artist: 5 songs
-                    // - Related: 2 songs
-                    // If some sources are unavailable, fallback gracefully.
-                    val targetGenreCount = if (genreSongs.isNotEmpty()) 8 else 0
-                    val targetArtistCount = if (artistSongs.isNotEmpty()) {
-                        if (targetGenreCount == 0) 10 else 5 // If genre is empty, take up to 10 from artist (70%)
-                    } else 0
-                    val targetRelatedCount = 15 - (targetGenreCount + targetArtistCount) // fill the rest (min 2, max 15)
-                    
-                    var genreAdded = 0
-                    var artistAdded = 0
-                    var relatedAdded = 0
-                    
-                    // Interleave loops
-                    while (finalSongs.size < 15 && (recIdx < recommendedList.size || artIdx < artistSongs.size || genIdx < genreSongs.size)) {
-                        // 1. Add Genre (up to targetGenreCount)
-                        if (genIdx < genreSongs.size && genreAdded < targetGenreCount) {
-                            val s = genreSongs[genIdx++]
-                            if (seenIds.add(s.id)) {
-                                finalSongs.add(s)
-                                genreAdded++
-                            }
-                        }
-                        // 2. Add Artist (up to targetArtistCount)
-                        if (artIdx < artistSongs.size && artistAdded < targetArtistCount && finalSongs.size < 15) {
-                            val s = artistSongs[artIdx++]
-                            if (seenIds.add(s.id)) {
-                                finalSongs.add(s)
-                                artistAdded++
-                            }
-                        }
-                        // 3. Add Related (up to targetRelatedCount)
-                        if (recIdx < recommendedList.size && relatedAdded < targetRelatedCount && finalSongs.size < 15) {
-                            val s = recommendedList[recIdx++]
-                            if (seenIds.add(s.id)) {
-                                finalSongs.add(s)
-                                relatedAdded++
-                            }
-                        }
-                        
-                        // Safety breakout: if no new songs can be added from any index progress
-                        if (recIdx >= recommendedList.size && artIdx >= artistSongs.size && genIdx >= genreSongs.size) {
-                            break
-                        }
-                    }
-                    
-                    // If still under 15, fill the rest with whatever is remaining in related
-                    if (finalSongs.size < 15) {
-                        for (s in recommendedList) {
-                            if (seenIds.add(s.id)) {
-                                finalSongs.add(s)
-                                if (finalSongs.size >= 15) break
-                            }
-                        }
-                    }
-                    
-                    return@withContext finalSongs
+                    invidiousSuccess = true
+                    log("Successfully fetched ${recommendedList.size} recommended videos from Invidious instance: $base")
+                    break
                 }
             } catch (e: Exception) {
-                e.printStackTrace()
+                log("Invidious info query failed for $base: ${e.message}")
             }
         }
-        return@withContext emptyList()
+        
+        // 3. Fallback: If Invidious recommended list is empty/failed, use local NewPipe search
+        if (!invidiousSuccess || recommendedList.isEmpty()) {
+            log("Invidious failed or returned empty. Using local NewPipe search for recommended fallback...")
+            val queryText = if (!author.isNullOrBlank()) "$author popular songs" else songTitle
+            if (queryText.isNotBlank()) {
+                try {
+                    val localRelated = searchNewPipe(queryText).filter { !isSameSongTitle(it.title, songTitle, author) }
+                    recommendedList.addAll(localRelated)
+                    log("Local search fallback found ${localRelated.size} similar items.")
+                } catch (e: Exception) {
+                    log("Local search fallback failed: ${e.message}")
+                }
+            }
+        }
+        
+        // 4. Detect genre and language
+        val genreMappings = mapOf(
+            "pop" to "pop music",
+            "girlband" to "pop music",
+            "girl group" to "pop music",
+            "boyband" to "pop music",
+            "kpop" to "kpop music",
+            "rock" to "rock music",
+            "metal" to "metal music",
+            "punk" to "rock music",
+            "rap" to "rap music",
+            "hip hop" to "hip hop music",
+            "drill" to "rap music",
+            "trap" to "trap music",
+            "r&b" to "r&b music",
+            "jazz" to "jazz music",
+            "classical" to "classical music",
+            "electronic" to "electronic music",
+            "dance" to "dance music",
+            "house" to "house music",
+            "techno" to "techno music",
+            "edm" to "edm music",
+            "indie" to "indie music",
+            "alternative" to "alternative music",
+            "country" to "country music",
+            "folk" to "folk music",
+            "lofi" to "lofi hip hop",
+            "chill" to "lofi hip hop"
+        )
+        
+        val isTurkish = tags.any { tag -> tag.any { c -> c == 'ı' || c == 'ş' || c == 'ğ' || c == 'ü' || c == 'ö' || c == 'ç' } }
+        val matchedKey = genreMappings.keys.find { key -> tags.any { tag -> tag.contains(key) } }
+        val mappedGenre = matchedKey?.let { genreMappings[it] }
+        
+        val genreQuery = if (!mappedGenre.isNullOrEmpty()) {
+            if (isTurkish && mappedGenre == "pop music") {
+                "popüler türkçe pop"
+            } else if (isTurkish && (mappedGenre == "rap music" || mappedGenre == "hip hop music" || mappedGenre == "trap music")) {
+                "popüler türkçe rap"
+            } else {
+                "popular $mappedGenre"
+            }
+        } else {
+            if (isTurkish) "popüler türkçe müzik" else "popular music"
+        }
+        
+        val artistQuery = if (!author.isNullOrEmpty() && author != "Unknown Author" && author != "Unknown") {
+            val lowerAuthor = author.lowercase(java.util.Locale.ROOT)
+            val qualifiers = listOf("music", "müzik", "video", "song", "şarkı", "band", "grubu", "group", "girlband", "boyband", "live", "concert", "albüm", "album")
+            val qualifiedTag = tags.find { tag ->
+                tag.contains(lowerAuthor) && qualifiers.any { q -> tag.contains(q) } && !tag.contains("reaction") && !tag.contains("cover")
+            }
+            qualifiedTag ?: (if (isTurkish) "$author şarkıları" else "$author songs")
+        } else {
+            ""
+        }
+        
+        // Fetch artist songs and genre popular songs using curated popular hits database
+        loadPopularHits()
+        
+        val (artistSongs, genreSongs) = coroutineScope {
+            // A. Get artist queries from database if available
+            val dbArtistSongsDeferred = async {
+                val queries = mutableListOf<String>()
+                if (!author.isNullOrEmpty() && author != "Unknown Author" && author != "Unknown") {
+                    val lowerAuthor = author.lowercase(java.util.Locale.ROOT)
+                    val artistsObj = popularHits?.getAsJsonObject("artists")
+                    if (artistsObj != null) {
+                        val matchedKey = artistsObj.keySet().find { key ->
+                            lowerAuthor.contains(key) || key.contains(lowerAuthor)
+                        }
+                        if (matchedKey != null) {
+                            val arr = artistsObj.getAsJsonArray(matchedKey)
+                            for (j in 0 until arr.size()) {
+                                val obj = arr.get(j).asJsonObject
+                                obj.get("query")?.asString?.let { queries.add(it) }
+                            }
+                        }
+                    }
+                }
+                
+                // Query them in parallel locally via NewPipe
+                val results = queries.map { q ->
+                    async { searchNewPipe(q).firstOrNull { !isSameSongTitle(it.title, songTitle, author) } }
+                }.mapNotNull { it.await() }
+                
+                // If we didn't find enough or didn't have any queries, fall back to keyword search
+                if (results.size < 3 && artistQuery.isNotEmpty()) {
+                    val fallback = searchNewPipe(artistQuery).filter { !isSameSongTitle(it.title, songTitle, author) }
+                    (results + fallback).distinctBy { it.id }
+                } else {
+                    results
+                }
+            }
+            
+            // B. Get genre queries from database if available
+            val dbGenreSongsDeferred = async {
+                val queries = mutableListOf<String>()
+                val genresObj = popularHits?.getAsJsonObject("genres")
+                if (genresObj != null && !mappedGenre.isNullOrEmpty()) {
+                    val genreKey = when {
+                        mappedGenre.contains("pop") -> if (isTurkish) "pop_tr" else "pop_global"
+                        mappedGenre.contains("rap") || mappedGenre.contains("hip hop") || mappedGenre.contains("trap") -> if (isTurkish) "rap_tr" else "rap_global"
+                        mappedGenre.contains("rock") || mappedGenre.contains("metal") || mappedGenre.contains("alternative") -> if (isTurkish) "rock_tr" else "rock_global"
+                        else -> null
+                    }
+                    if (genreKey != null && genresObj.has(genreKey)) {
+                        val arr = genresObj.getAsJsonArray(genreKey)
+                        val list = mutableListOf<String>()
+                        for (j in 0 until arr.size()) {
+                            val obj = arr.get(j).asJsonObject
+                            obj.get("query")?.asString?.let { list.add(it) }
+                        }
+                        list.shuffle()
+                        queries.addAll(list.take(8))
+                    }
+                }
+                
+                // Query them in parallel locally via NewPipe
+                val results = queries.map { q ->
+                    async { searchNewPipe(q).firstOrNull { !isSameSongTitle(it.title, songTitle, author) } }
+                }.mapNotNull { it.await() }
+                
+                // If we didn't find enough or didn't have any queries, fall back to keyword search
+                if (results.size < 5 && genreQuery.isNotEmpty()) {
+                    val fallback = searchNewPipe(genreQuery).filter { !isSameSongTitle(it.title, songTitle, author) }
+                    (results + fallback).distinctBy { it.id }
+                } else {
+                    results
+                }
+            }
+            
+            Pair(dbArtistSongsDeferred.await(), dbGenreSongsDeferred.await())
+        }
+        
+        // Mixing and Deduplication logic matching User's requested ratio:
+        // 50% Genre, 35% Artist, 15% Related
+        val finalSongs = mutableListOf<SongEntity>()
+        val seenIds = mutableSetOf<String>()
+        seenIds.add(songId) // skip seed song
+        
+        // Setup indices
+        var recIdx = 0
+        var artIdx = 0
+        var genIdx = 0
+        
+        // We target 15 songs.
+        // The distribution:
+        // - Genre: 8 songs
+        // - Artist: 5 songs
+        // - Related: 2 songs
+        // If some sources are unavailable, fallback gracefully.
+        val targetGenreCount = if (genreSongs.isNotEmpty()) 8 else 0
+        val targetArtistCount = if (artistSongs.isNotEmpty()) {
+            if (targetGenreCount == 0) 10 else 5 // If genre is empty, take up to 10 from artist (70%)
+        } else 0
+        val targetRelatedCount = 15 - (targetGenreCount + targetArtistCount) // fill the rest (min 2, max 15)
+        
+        var genreAdded = 0
+        var artistAdded = 0
+        var relatedAdded = 0
+        
+        // Interleave loops
+        while (finalSongs.size < 15 && (recIdx < recommendedList.size || artIdx < artistSongs.size || genIdx < genreSongs.size)) {
+            // 1. Add Genre (up to targetGenreCount)
+            if (genIdx < genreSongs.size && genreAdded < targetGenreCount) {
+                val s = genreSongs[genIdx++]
+                if (seenIds.add(s.id)) {
+                    finalSongs.add(s)
+                    genreAdded++
+                }
+            }
+            // 2. Add Artist (up to targetArtistCount)
+            if (artIdx < artistSongs.size && artistAdded < targetArtistCount && finalSongs.size < 15) {
+                val s = artistSongs[artIdx++]
+                if (seenIds.add(s.id)) {
+                    finalSongs.add(s)
+                    artistAdded++
+                }
+            }
+            // 3. Add Related (up to targetRelatedCount)
+            if (recIdx < recommendedList.size && relatedAdded < targetRelatedCount && finalSongs.size < 15) {
+                val s = recommendedList[recIdx++]
+                if (seenIds.add(s.id)) {
+                    finalSongs.add(s)
+                    relatedAdded++
+                }
+            }
+            
+            // Safety breakout: if no new songs can be added from any index progress
+            if (recIdx >= recommendedList.size && artIdx >= artistSongs.size && genIdx >= genreSongs.size) {
+                break
+            }
+        }
+        
+        // If still under 15, fill the rest with whatever is remaining in related
+        if (finalSongs.size < 15) {
+            for (s in recommendedList) {
+                if (seenIds.add(s.id)) {
+                    finalSongs.add(s)
+                    if (finalSongs.size >= 15) break
+                }
+            }
+        }
+        return@withContext finalSongs
     }
 
     // Local DB Flows
@@ -826,6 +981,45 @@ class MusicRepository(private val context: Context) {
             }
             dao.updateSong(existing.copy(isDownloaded = false, localUri = null))
         }
+    }
+
+    private fun isSameSongTitle(candidateTitle: String, seedTitle: String, author: String?): Boolean {
+        fun cleanTitle(title: String): String {
+            var t = title.lowercase(java.util.Locale.ROOT)
+            if (!author.isNullOrBlank()) {
+                val lowerAuthor = author.lowercase(java.util.Locale.ROOT)
+                t = t.replace(lowerAuthor, "")
+            }
+            t = t.replace(Regex("\\([^)]*\\)"), "")
+            t = t.replace(Regex("\\[[^]]*\\]"), "")
+            val removals = listOf(
+                "official", "video", "audio", "lyrics", "clip", "klip", "müzik", "music",
+                "vevo", "hd", "4k", "remix", "cover", "live", "konser", "acoustic", "akustik",
+                "karaoke", "instrumental", "enstrümantal", "slowed", "speed", "reverb", "loop",
+                "hour", "original", "orijinal"
+            )
+            for (word in removals) {
+                t = t.replace(word, "")
+            }
+            t = t.replace(Regex("[^a-zA-Z0-9\\sıişğüöç\\d]"), " ")
+            return t.trim()
+        }
+
+        val cleanSeed = cleanTitle(seedTitle)
+        val cleanCandidate = cleanTitle(candidateTitle)
+
+        val seedWords = cleanSeed.split(Regex("\\s+"))
+            .map { it.trim() }
+            .filter { it.length > 2 }
+
+        if (seedWords.isEmpty()) return false
+
+        val candidateWords = cleanCandidate.split(Regex("\\s+")).map { it.trim() }
+        val matchesAll = seedWords.all { word ->
+            candidateWords.any { cWord -> cWord.contains(word) || word.contains(cWord) }
+        }
+        
+        return matchesAll
     }
 
     fun log(message: String) {

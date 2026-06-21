@@ -8,6 +8,7 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.MediaSession
@@ -255,7 +256,11 @@ class PlaybackService : MediaLibraryService() {
                             val dbSong = repository.getSongByIdSync(songId)
                             val playUri = if (dbSong?.isDownloaded == true && dbSong.localUri != null) {
                                 repository.log("PlaybackService: Playing downloaded local file: ${dbSong.localUri}")
-                                dbSong.localUri
+                                if (dbSong.localUri.startsWith("/")) {
+                                    "file://${dbSong.localUri}"
+                                } else {
+                                    dbSong.localUri
+                                }
                             } else {
                                 if (songId.startsWith("yt_")) {
                                     "youtube://$songId"
@@ -295,9 +300,11 @@ class PlaybackService : MediaLibraryService() {
             .setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
             .setAllowCrossProtocolRedirects(true)
 
+        val defaultDataSourceFactory = DefaultDataSource.Factory(this, httpDataSourceFactory)
+
         val cacheDataSourceFactory = CacheDataSource.Factory()
             .setCache(getCache(this))
-            .setUpstreamDataSourceFactory(httpDataSourceFactory)
+            .setUpstreamDataSourceFactory(defaultDataSourceFactory)
             .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
 
         val resolvingDataSourceFactory = ResolvingDataSourceFactory(repository, cacheDataSourceFactory)
@@ -313,10 +320,15 @@ class PlaybackService : MediaLibraryService() {
 
         player?.addListener(object : androidx.media3.common.Player.Listener {
             override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
-                repository.log("PlaybackService [EXOPLAYER ERROR]: ${error.message} (errorCode: ${error.errorCode}, name: ${error.errorCodeName})")
+                val currentItem = player?.currentMediaItem
+                val mediaUri = currentItem?.localConfiguration?.uri?.toString() ?: "null"
+                repository.log("PlaybackService [EXOPLAYER ERROR]: ${error.message} (errorCode: ${error.errorCode}, name: ${error.errorCodeName}, mediaId: ${currentItem?.mediaId}, uri: $mediaUri)")
                 val cause = error.cause
                 if (cause != null) {
                     repository.log("  Cause: ${cause.message}")
+                    val sw = java.io.StringWriter()
+                    cause.printStackTrace(java.io.PrintWriter(sw))
+                    repository.log("  Stacktrace:\n$sw")
                 }
             }
             override fun onPlaybackStateChanged(playbackState: Int) {

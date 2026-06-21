@@ -20,8 +20,10 @@ okhttp = "4.12.0"
 coil = "2.6.0"
 ksp = "2.3.9"
 youtubeExtractor = "1.0.2"
+newpipeExtractorKmp = "1.2.1"
 
 [libraries]
+newpipe-extractor-kmp = { module = "io.github.yushosei:newpipe-extractor-kmp", version.ref = "newpipeExtractorKmp" }
 youtube-extractor = { module = "io.github.ajaydhattarwal:youtube-extractor-android", version.ref = "youtubeExtractor" }
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "androidxCore" }
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "androidxActivity" }

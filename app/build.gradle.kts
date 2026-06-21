@@ -103,6 +103,6 @@ dependencies {
   // Material Icons Extended
   implementation("androidx.compose.material:material-icons-extended")
   
-  // Local YouTube Extractor
-  implementation(libs.youtube.extractor)
+  // Modern NewPipe Extractor
+  implementation(libs.newpipe.extractor.kmp)
 }

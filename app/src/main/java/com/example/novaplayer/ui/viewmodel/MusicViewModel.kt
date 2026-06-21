@@ -25,6 +25,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 
 class MusicViewModel(context: Context) : ViewModel() {
@@ -67,6 +68,23 @@ class MusicViewModel(context: Context) : ViewModel() {
 
     private val _currentQueue = MutableStateFlow<List<SongEntity>>(emptyList())
     val currentQueue: StateFlow<List<SongEntity>> = _currentQueue.asStateFlow()
+
+    private val _playbackState = MutableStateFlow(Player.STATE_IDLE)
+    val playbackState: StateFlow<Int> = _playbackState.asStateFlow()
+
+    // Combined player loading/status text overlay
+    val playerStatusText: StateFlow<String> = combine(
+        MusicRepository.resolutionStatus,
+        _playbackState
+    ) { status, state ->
+        if (status.isNotEmpty()) {
+            status
+        } else if (state == Player.STATE_BUFFERING) {
+            "Yükleniyor..."
+        } else {
+            ""
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "")
 
     // Local DB flows
     val favoriteSongs: StateFlow<List<SongEntity>> = repository.getFavoriteSongsFlow()
@@ -112,6 +130,7 @@ class MusicViewModel(context: Context) : ViewModel() {
         updateCurrentQueue()
         _playbackPosition.value = controller.currentPosition
         _trackDuration.value = controller.duration.coerceAtLeast(0L)
+        _playbackState.value = controller.playbackState
 
         controller.addListener(object : Player.Listener {
             override fun onTimelineChanged(timeline: androidx.media3.common.Timeline, reason: Int) {
@@ -141,6 +160,7 @@ class MusicViewModel(context: Context) : ViewModel() {
 
             override fun onPlaybackStateChanged(playbackState: Int) {
                 _trackDuration.value = controller.duration.coerceAtLeast(0L)
+                _playbackState.value = playbackState
             }
 
             override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
@@ -243,7 +263,9 @@ class MusicViewModel(context: Context) : ViewModel() {
                 val recommended = repository.getRecommendedVideos(songId)
                 if (recommended.isNotEmpty()) {
                     val mediaItems = recommended.map { item ->
-                        val playUri = if (item.isDownloaded && item.localUri != null) item.localUri else item.audioUrl
+                        val playUri = if (item.isDownloaded && item.localUri != null) {
+                            if (item.localUri.startsWith("/")) "file://${item.localUri}" else item.localUri
+                        } else item.audioUrl
                         val uriObj = if (!playUri.isNullOrEmpty()) android.net.Uri.parse(playUri) else null
                         
                         MediaItem.Builder()
@@ -291,7 +313,9 @@ class MusicViewModel(context: Context) : ViewModel() {
             _isLoading.value = true
 
             val mediaItems = queue.map { item ->
-                val playUri = if (item.isDownloaded && item.localUri != null) item.localUri else item.audioUrl
+                val playUri = if (item.isDownloaded && item.localUri != null) {
+                    if (item.localUri.startsWith("/")) "file://${item.localUri}" else item.localUri
+                } else item.audioUrl
                 val uriObj = if (!playUri.isNullOrEmpty()) android.net.Uri.parse(playUri) else null
                 
                 MediaItem.Builder()

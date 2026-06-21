@@ -54,6 +54,7 @@ fun PlayerSheet(
     val downloadingProgress by viewModel.downloadingProgress.collectAsState()
     val playlists by viewModel.playlists.collectAsState()
     val queue by viewModel.currentQueue.collectAsState()
+    val statusText by viewModel.playerStatusText.collectAsState()
 
     var showPlaylistDialog by remember { mutableStateOf(false) }
     var showQueue by remember { mutableStateOf(false) }
@@ -340,6 +341,15 @@ fun PlayerSheet(
                             fontWeight = FontWeight.SemiBold,
                             letterSpacing = 1.sp
                         )
+                        if (statusText.isNotEmpty()) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = statusText,
+                                color = NeonGreen,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Normal
+                            )
+                        }
                     }
 
                     // Seek bar

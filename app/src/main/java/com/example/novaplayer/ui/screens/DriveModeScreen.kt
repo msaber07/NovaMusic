@@ -94,7 +94,7 @@ fun DriveModeScreen(
                         withTimeout(5000) {
                             val results = viewModel.searchResults.first { it.isNotEmpty() }
                             if (results.isNotEmpty()) {
-                                viewModel.play(results.first(), results)
+                                viewModel.play(results.first(), listOf(results.first()))
                                 isSearching = false
                                 searchQuery = ""
                                 focusManager.clearFocus()
@@ -238,7 +238,7 @@ fun DriveModeScreen(
                                             .background(CyberDarkBlue, RoundedCornerShape(14.dp))
                                             .border(1.dp, NeonOrange.copy(alpha = 0.2f), RoundedCornerShape(14.dp))
                                             .clickable {
-                                                viewModel.play(song, searchResults)
+                                                viewModel.play(song, listOf(song))
                                                 searchQuery = ""
                                                 isSearching = false
                                                 focusManager.clearFocus()

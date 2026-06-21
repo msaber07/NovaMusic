@@ -138,7 +138,7 @@ fun SearchScreen(viewModel: MusicViewModel) {
                         isFailed = isFailed,
                         isDownloading = downloadingProgress.containsKey(song.id),
                         downloadProgress = downloadingProgress[song.id] ?: 0f,
-                        onPlayClick = { viewModel.play(song, searchResults) },
+                        onPlayClick = { viewModel.play(song, listOf(song)) },
                         onFavoriteClick = { viewModel.toggleFavorite(song) },
                         onDownloadClick = {
                             if (song.isDownloaded) {
