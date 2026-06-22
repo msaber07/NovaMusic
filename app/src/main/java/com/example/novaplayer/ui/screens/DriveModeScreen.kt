@@ -68,6 +68,8 @@ fun DriveModeScreen(
     val favoriteSongs by viewModel.favoriteSongs.collectAsState()
     val downloadedSongs by viewModel.downloadedSongs.collectAsState()
     val queue by viewModel.currentQueue.collectAsState()
+    val position by viewModel.playbackPosition.collectAsState()
+    val duration by viewModel.trackDuration.collectAsState()
 
     var searchQuery by remember { mutableStateOf("") }
     var isSearching by remember { mutableStateOf(false) }
@@ -515,6 +517,53 @@ fun DriveModeScreen(
                                     )
                                 }
                             }
+
+                            Spacer(modifier = Modifier.height(16.dp))
+
+                            // Seek bar in Drive Mode
+                            Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+                                val sliderPosition = if (duration > 0) position.toFloat() / duration else 0f
+                                var isSeeking by remember { mutableStateOf(false) }
+                                var localSliderValue by remember { mutableStateOf(0f) }
+
+                                Slider(
+                                    value = if (isSeeking) localSliderValue else sliderPosition,
+                                    onValueChange = {
+                                        isSeeking = true
+                                        localSliderValue = it
+                                    },
+                                    onValueChangeFinished = {
+                                        isSeeking = false
+                                        viewModel.seekTo((localSliderValue * duration).toLong())
+                                    },
+                                    colors = SliderDefaults.colors(
+                                        activeTrackColor = NeonOrange,
+                                        inactiveTrackColor = CyberSurface,
+                                        thumbColor = NeonOrange,
+                                        activeTickColor = Color.Transparent,
+                                        inactiveTickColor = Color.Transparent
+                                    ),
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 4.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(
+                                        text = formatTime(position),
+                                        color = TextSecondary,
+                                        fontSize = 12.sp
+                                    )
+                                    Text(
+                                        text = formatTime(duration),
+                                        color = TextSecondary,
+                                        fontSize = 12.sp
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -760,4 +809,11 @@ fun DriveModeScreen(
             }
         }
     }
+}
+
+private fun formatTime(ms: Long): String {
+    val totalSeconds = ms / 1000
+    val minutes = totalSeconds / 60
+    val seconds = totalSeconds % 60
+    return String.format("%02d:%02d", minutes, seconds)
 }
