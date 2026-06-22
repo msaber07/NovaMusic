@@ -55,8 +55,8 @@ class MusicViewModel(context: Context) : ViewModel() {
     private val _searchResults = MutableStateFlow<List<SongEntity>>(emptyList())
     val searchResults: StateFlow<List<SongEntity>> = _searchResults.asStateFlow()
 
-    private val _trendingSongs = MutableStateFlow<List<SongEntity>>(emptyList())
-    val trendingSongs: StateFlow<List<SongEntity>> = _trendingSongs.asStateFlow()
+    private val _recentlyPlayedSongs = MutableStateFlow<List<SongEntity>>(emptyList())
+    val recentlyPlayedSongs: StateFlow<List<SongEntity>> = _recentlyPlayedSongs.asStateFlow()
 
     private val _failedSongs = MutableStateFlow<Set<String>>(emptySet())
     val failedSongs: StateFlow<Set<String>> = _failedSongs.asStateFlow()
@@ -90,15 +90,15 @@ class MusicViewModel(context: Context) : ViewModel() {
     // Local DB flows
     val favoriteSongs: StateFlow<List<SongEntity>> = repository.getFavoriteSongsFlow()
         .catch { emit(emptyList()) }
-        .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val downloadedSongs: StateFlow<List<SongEntity>> = repository.getDownloadedSongsFlow()
         .catch { emit(emptyList()) }
-        .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val playlists: StateFlow<List<PlaylistEntity>> = repository.getAllPlaylistsFlow()
         .catch { emit(emptyList()) }
-        .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     private var progressJob: Job? = null
     private var searchJob: Job? = null
@@ -107,7 +107,7 @@ class MusicViewModel(context: Context) : ViewModel() {
 
     init {
         initializeController(context)
-        loadTrending()
+        loadRecentlyPlayed()
     }
 
     private fun initializeController(context: Context) {
@@ -197,11 +197,52 @@ class MusicViewModel(context: Context) : ViewModel() {
             return
         }
         val songId = mediaItem.mediaId
+        val song = favoriteSongs.value.find { it.id == songId }
+            ?: downloadedSongs.value.find { it.id == songId }
+            ?: _searchResults.value.find { it.id == songId }
+            ?: _recentlyPlayedSongs.value.find { it.id == songId }
+            ?: SongEntity(
+                id = songId,
+                title = mediaItem.mediaMetadata.title?.toString() ?: "Unknown",
+                artistName = mediaItem.mediaMetadata.artist?.toString() ?: "Unknown",
+                audioUrl = mediaItem.localConfiguration?.uri?.toString() ?: mediaItem.requestMetadata.mediaUri?.toString() ?: "",
+                durationSeconds = 0,
+                albumImageUrl = mediaItem.mediaMetadata.artworkUri?.toString()
+            )
+        _currentSong.value = song
         viewModelScope.launch {
-            val song = repository.getFavoriteSongsFlow().first().find { it.id == songId }
-                ?: repository.getDownloadedSongsFlow().first().find { it.id == songId }
-                ?: _searchResults.value.find { it.id == songId }
-                ?: _trendingSongs.value.find { it.id == songId }
+            repository.insertSong(song)
+        }
+    }
+
+    private fun updateCurrentQueue() {
+        val controller = mediaController
+        if (controller == null) {
+            repository.log("updateCurrentQueue: mediaController is null!")
+            return
+        }
+        val count = controller.mediaItemCount
+        repository.log("updateCurrentQueue: controller mediaItemCount = $count")
+        val items = ArrayList<MediaItem>()
+        for (i in 0 until count) {
+            val item = try { controller.getMediaItemAt(i) } catch (e: Exception) { null }
+            if (item != null) {
+                items.add(item)
+            }
+        }
+        repository.log("updateCurrentQueue: extracted ${items.size} items from controller")
+        
+        val favorites = favoriteSongs.value
+        val downloads = downloadedSongs.value
+        val search = _searchResults.value
+        val recent = _recentlyPlayedSongs.value
+        
+        val mapped = items.map { mediaItem ->
+            val songId = mediaItem.mediaId
+            favorites.find { it.id == songId }
+                ?: downloads.find { it.id == songId }
+                ?: search.find { it.id == songId }
+                ?: recent.find { it.id == songId }
                 ?: SongEntity(
                     id = songId,
                     title = mediaItem.mediaMetadata.title?.toString() ?: "Unknown",
@@ -210,41 +251,9 @@ class MusicViewModel(context: Context) : ViewModel() {
                     durationSeconds = 0,
                     albumImageUrl = mediaItem.mediaMetadata.artworkUri?.toString()
                 )
-            _currentSong.value = song
         }
-    }
-
-    private fun updateCurrentQueue() {
-        val controller = mediaController ?: return
-        val count = controller.mediaItemCount
-        val items = ArrayList<MediaItem>()
-        for (i in 0 until count) {
-            val item = try { controller.getMediaItemAt(i) } catch (e: Exception) { null }
-            if (item != null) {
-                items.add(item)
-            }
-        }
-        viewModelScope.launch {
-            val favorites = repository.getFavoriteSongsFlow().first()
-            val downloads = repository.getDownloadedSongsFlow().first()
-            
-            val mapped = items.map { mediaItem ->
-                val songId = mediaItem.mediaId
-                favorites.find { it.id == songId }
-                    ?: downloads.find { it.id == songId }
-                    ?: _searchResults.value.find { it.id == songId }
-                    ?: _trendingSongs.value.find { it.id == songId }
-                    ?: SongEntity(
-                        id = songId,
-                        title = mediaItem.mediaMetadata.title?.toString() ?: "Unknown",
-                        artistName = mediaItem.mediaMetadata.artist?.toString() ?: "Unknown",
-                        audioUrl = mediaItem.localConfiguration?.uri?.toString() ?: mediaItem.requestMetadata.mediaUri?.toString() ?: "",
-                        durationSeconds = 0,
-                        albumImageUrl = mediaItem.mediaMetadata.artworkUri?.toString()
-                    )
-            }
-            _currentQueue.value = mapped
-        }
+        repository.log("updateCurrentQueue: mapped queue size = ${mapped.size}")
+        _currentQueue.value = mapped
     }
 
     fun playQueueIndex(index: Int) {
@@ -282,7 +291,7 @@ class MusicViewModel(context: Context) : ViewModel() {
                             .build()
                     }
                     controller.addMediaItems(mediaItems)
-                    recommended.forEach { repository.insertSong(it) }
+                    updateCurrentQueue()
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
@@ -382,12 +391,10 @@ class MusicViewModel(context: Context) : ViewModel() {
         }
     }
 
-    private fun loadTrending() {
+    private fun loadRecentlyPlayed() {
         viewModelScope.launch {
-            _isLoading.value = true
-            repository.getTrendingTracks().collect { songs ->
-                _trendingSongs.value = songs
-                _isLoading.value = false
+            repository.getAllSongsFlow().collect { songs ->
+                _recentlyPlayedSongs.value = songs
             }
         }
     }
@@ -398,7 +405,7 @@ class MusicViewModel(context: Context) : ViewModel() {
             _searchResults.value = _searchResults.value.map {
                 if (it.id == song.id) it.copy(isFavorite = !it.isFavorite) else it
             }
-            _trendingSongs.value = _trendingSongs.value.map {
+            _recentlyPlayedSongs.value = _recentlyPlayedSongs.value.map {
                 if (it.id == song.id) it.copy(isFavorite = !it.isFavorite) else it
             }
             if (_currentSong.value?.id == song.id) {
@@ -453,7 +460,7 @@ class MusicViewModel(context: Context) : ViewModel() {
                 _searchResults.value = _searchResults.value.map {
                     if (it.id == song.id) it.copy(isDownloaded = true) else it
                 }
-                _trendingSongs.value = _trendingSongs.value.map {
+                _recentlyPlayedSongs.value = _recentlyPlayedSongs.value.map {
                     if (it.id == song.id) it.copy(isDownloaded = true) else it
                 }
                 if (_currentSong.value?.id == song.id) {
@@ -472,7 +479,7 @@ class MusicViewModel(context: Context) : ViewModel() {
             _searchResults.value = _searchResults.value.map {
                 if (it.id == song.id) it.copy(isDownloaded = false) else it
             }
-            _trendingSongs.value = _trendingSongs.value.map {
+            _recentlyPlayedSongs.value = _recentlyPlayedSongs.value.map {
                 if (it.id == song.id) it.copy(isDownloaded = false) else it
             }
             if (_currentSong.value?.id == song.id) {

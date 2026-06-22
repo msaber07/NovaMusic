@@ -1,9 +1,11 @@
 <resources>
-    <string name="app_name">NovaPlayer</string>
+    <string name="app_name">NovaMusic</string>
     <string name="discover_nova">NOVA KEŞFET</string>
     <string name="drive_mode_desc">Araç Modu</string>
     <string name="select_genre">TARZ SEÇİN</string>
     <string name="trending_music">TREND MÜZİKLER</string>
+    <string name="recently_played">SON OYNATILANLAR</string>
+    <string name="no_recently_played">Henüz müzik oynatılmadı</string>
     <string name="failed_to_load_music">Müzikler yüklenemedi. İnternetinizi kontrol edin.</string>
     <string name="your_favorites">FAVORİLERİNİZ</string>
     <string name="no_favorites_yet">Henüz favori şarkınız yok.</string>

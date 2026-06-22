@@ -1,6 +1,6 @@
-# 🎵 NovaPlayer - Cyberpunk Android Music Player
+# 🎵 NovaMusic - Cyberpunk Android Music Player
 
-NovaPlayer is a lightweight, open-source Android music player designed with a premium, futuristic cyberpunk-neon aesthetic. It streams music directly from online sources with high performance, supports offline downloads, playlist management, full localization, and features a specialized driving dashboard with voice controls.
+NovaMusic is a lightweight, open-source Android music player designed with a premium, futuristic cyberpunk-neon aesthetic. It streams music directly from online sources with high performance, supports offline downloads, playlist management, full localization, and features a specialized driving dashboard with voice controls.
 
 ---
 
@@ -38,8 +38,8 @@ NovaPlayer is a lightweight, open-source Android music player designed with a pr
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/YOUR_USERNAME/NovaPlayer.git
-   cd NovaPlayer
+   git clone https://github.com/msaber07/NovaMusic.git
+   cd NovaMusic
    ```
 
 2. Build the debug APK:
@@ -59,7 +59,7 @@ NovaPlayer is a lightweight, open-source Android music player designed with a pr
 
 ## 🤝 Contributing
 
-Contributions, issues, and feature requests are welcome! Feel free to check the [issues page](https://github.com/YOUR_USERNAME/NovaPlayer/issues).
+Contributions, issues, and feature requests are welcome! Feel free to check the [issues page](https://github.com/msaber07/NovaMusic/issues).
 
 ---
 

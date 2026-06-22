@@ -465,6 +465,7 @@ class MusicRepository(private val context: Context) {
                             val adaptiveFormats = streamingData.getAsJsonArray("adaptiveFormats")
                             if (adaptiveFormats != null && adaptiveFormats.size() > 0) {
                                 var selectedUrl: String? = null
+                                var bestScore = -1
                                 
                                 for (element in adaptiveFormats) {
                                     val fmt = element.asJsonObject
@@ -472,10 +473,21 @@ class MusicRepository(private val context: Context) {
                                     if (mimeType.contains("audio")) {
                                         val streamUrl = fmt.get("url")?.asString
                                         if (!streamUrl.isNullOrEmpty()) {
-                                            selectedUrl = streamUrl
-                                            log("  InnerTube found audio stream: mimeType=$mimeType, bitrate=${fmt.get("bitrate")?.asInt}")
-                                            if (mimeType.contains("audio/mp4") || mimeType.contains("audio/m4a")) {
-                                                break
+                                            val itag = fmt.get("itag")?.asInt ?: -1
+                                            val score = when (itag) {
+                                                140 -> 5
+                                                251 -> 4
+                                                250 -> 3
+                                                249 -> 2
+                                                139 -> 1
+                                                else -> 0
+                                            }
+                                            
+                                            log("  InnerTube found audio stream: itag=$itag, score=$score, mimeType=$mimeType, bitrate=${fmt.get("bitrate")?.asInt}")
+                                            
+                                            if (score > bestScore || selectedUrl == null) {
+                                                bestScore = score
+                                                selectedUrl = streamUrl
                                             }
                                         }
                                     }
@@ -792,7 +804,6 @@ class MusicRepository(private val context: Context) {
                     val bodyStr = response.body?.string() ?: continue
                     val jsonObj = com.google.gson.JsonParser().parse(bodyStr).asJsonObject
                     
-                    // Extract author and tags from Invidious if local failed
                     if (author.isNullOrBlank()) {
                         author = jsonObj.get("author")?.let { if (it.isJsonNull) null else it.getAsString() }
                     }
@@ -809,7 +820,6 @@ class MusicRepository(private val context: Context) {
                         }
                     }
                     
-                    // Parse direct recommended videos
                     val recommendedJson = jsonObj.get("recommendedVideos")
                     if (recommendedJson != null && recommendedJson.isJsonArray) {
                         val jsonArray = recommendedJson.asJsonArray
@@ -926,75 +936,32 @@ class MusicRepository(private val context: Context) {
         loadPopularHits()
         
         val (artistSongs, genreSongs) = coroutineScope {
-            // A. Get artist queries from database if available
             val dbArtistSongsDeferred = async {
-                val queries = mutableListOf<String>()
-                if (!author.isNullOrEmpty() && author != "Unknown Author" && author != "Unknown") {
-                    val lowerAuthor = author.lowercase(java.util.Locale.ROOT)
-                    val artistsObj = popularHits?.getAsJsonObject("artists")
-                    if (artistsObj != null) {
-                        val matchedKey = artistsObj.keySet().find { key ->
-                            lowerAuthor.contains(key) || key.contains(lowerAuthor)
-                        }
-                        if (matchedKey != null) {
-                            val arr = artistsObj.getAsJsonArray(matchedKey)
-                            for (j in 0 until arr.size()) {
-                                val obj = arr.get(j).asJsonObject
-                                obj.get("query")?.asString?.let { queries.add(it) }
-                            }
-                        }
+                val results = mutableListOf<SongEntity>()
+                if (artistQuery.isNotEmpty()) {
+                    try {
+                        val songs = searchNewPipe(artistQuery).filter { !isSameSongTitle(it.title, songTitle, author) }
+                        results.addAll(songs)
+                        log("Artist query search found ${songs.size} items.")
+                    } catch (e: Exception) {
+                        log("Artist query search failed: ${e.message}")
                     }
                 }
-                
-                // Query them in parallel locally via NewPipe
-                val results = queries.map { q ->
-                    async { searchNewPipe(q).firstOrNull { !isSameSongTitle(it.title, songTitle, author) } }
-                }.mapNotNull { it.await() }
-                
-                // If we didn't find enough or didn't have any queries, fall back to keyword search
-                if (results.size < 3 && artistQuery.isNotEmpty()) {
-                    val fallback = searchNewPipe(artistQuery).filter { !isSameSongTitle(it.title, songTitle, author) }
-                    (results + fallback).distinctBy { it.id }
-                } else {
-                    results
-                }
+                results
             }
             
-            // B. Get genre queries from database if available
             val dbGenreSongsDeferred = async {
-                val queries = mutableListOf<String>()
-                val genresObj = popularHits?.getAsJsonObject("genres")
-                if (genresObj != null && !mappedGenre.isNullOrEmpty()) {
-                    val genreKey = when {
-                        mappedGenre.contains("pop") -> if (isTurkish) "pop_tr" else "pop_global"
-                        mappedGenre.contains("rap") || mappedGenre.contains("hip hop") || mappedGenre.contains("trap") -> if (isTurkish) "rap_tr" else "rap_global"
-                        mappedGenre.contains("rock") || mappedGenre.contains("metal") || mappedGenre.contains("alternative") -> if (isTurkish) "rock_tr" else "rock_global"
-                        else -> null
-                    }
-                    if (genreKey != null && genresObj.has(genreKey)) {
-                        val arr = genresObj.getAsJsonArray(genreKey)
-                        val list = mutableListOf<String>()
-                        for (j in 0 until arr.size()) {
-                            val obj = arr.get(j).asJsonObject
-                            obj.get("query")?.asString?.let { list.add(it) }
-                        }
-                        list.shuffle()
-                        queries.addAll(list.take(8))
+                val results = mutableListOf<SongEntity>()
+                if (genreQuery.isNotEmpty()) {
+                    try {
+                        val songs = searchNewPipe(genreQuery).filter { !isSameSongTitle(it.title, songTitle, author) }
+                        results.addAll(songs)
+                        log("Genre query search found ${songs.size} items.")
+                    } catch (e: Exception) {
+                        log("Genre query search failed: ${e.message}")
                     }
                 }
-                
-                // Query them in parallel locally via NewPipe
-                val results = queries.map { q ->
-                    async { searchNewPipe(q).firstOrNull { !isSameSongTitle(it.title, songTitle, author) } }
-                }.mapNotNull { it.await() }
-                
-                // If we didn't find enough or didn't have any queries, fall back to keyword search
-                if (results.size < 5 && genreQuery.isNotEmpty()) {
-                    val fallback = searchNewPipe(genreQuery).filter { !isSameSongTitle(it.title, songTitle, author) }
-                    (results + fallback).distinctBy { it.id }
-                } else {
-                    results
-                }
+                results
             }
             
             Pair(dbArtistSongsDeferred.await(), dbGenreSongsDeferred.await())
@@ -1012,11 +979,6 @@ class MusicRepository(private val context: Context) {
         var genIdx = 0
         
         // We target 15 songs.
-        // The distribution:
-        // - Genre: 8 songs
-        // - Artist: 5 songs
-        // - Related: 2 songs
-        // If some sources are unavailable, fallback gracefully.
         val targetGenreCount = if (genreSongs.isNotEmpty()) 8 else 0
         val targetArtistCount = if (artistSongs.isNotEmpty()) {
             if (targetGenreCount == 0) 10 else 5 // If genre is empty, take up to 10 from artist (70%)
@@ -1069,12 +1031,15 @@ class MusicRepository(private val context: Context) {
                 }
             }
         }
+        
+        log("Recommendations loaded successfully. Total mixed recommendations: ${finalSongs.size}")
         return@withContext finalSongs
     }
 
     // Local DB Flows
     fun getFavoriteSongsFlow(): Flow<List<SongEntity>> = dao.getFavoriteSongsFlow()
     fun getDownloadedSongsFlow(): Flow<List<SongEntity>> = dao.getDownloadedSongsFlow()
+    fun getAllSongsFlow(): Flow<List<SongEntity>> = dao.getAllSongsFlow()
     fun getAllPlaylistsFlow(): Flow<List<PlaylistEntity>> = dao.getAllPlaylistsFlow()
     
     fun getPlaylistWithSongsFlow(playlistId: String): Flow<PlaylistWithSongs?> = 
@@ -1086,7 +1051,7 @@ class MusicRepository(private val context: Context) {
     }
 
     suspend fun insertSong(song: SongEntity) = withContext(Dispatchers.IO) {
-        dao.insertSong(song)
+        dao.insertSong(song.copy(addedAt = System.currentTimeMillis()))
     }
 
     suspend fun toggleFavorite(song: SongEntity) = withContext(Dispatchers.IO) {

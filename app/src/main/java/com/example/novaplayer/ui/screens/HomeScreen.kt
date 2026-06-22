@@ -43,7 +43,7 @@ fun HomeScreen(
     viewModel: MusicViewModel,
     onNavigateToSearch: () -> Unit
 ) {
-    val trendingSongs by viewModel.trendingSongs.collectAsState()
+    val recentlyPlayedSongs by viewModel.recentlyPlayedSongs.collectAsState()
     val favoriteSongs by viewModel.favoriteSongs.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
 
@@ -128,11 +128,11 @@ fun HomeScreen(
             }
         }
 
-        // Trending Section
+        // Recently Played Section
         item {
             Column {
                 Text(
-                    text = stringResource(R.string.trending_music),
+                    text = stringResource(R.string.recently_played),
                     color = TextSecondary,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
@@ -140,29 +140,21 @@ fun HomeScreen(
                     modifier = Modifier.padding(bottom = 8.dp)
                 )
 
-                if (isLoading && trendingSongs.isEmpty()) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(160.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        CircularProgressIndicator(color = NeonCyan)
-                    }
-                } else if (trendingSongs.isEmpty()) {
+                if (recentlyPlayedSongs.isEmpty()) {
                     Text(
-                        text = stringResource(R.string.failed_to_load_music),
+                        text = stringResource(R.string.no_recently_played),
                         color = TextSecondary,
-                        fontSize = 13.sp
+                        fontSize = 13.sp,
+                        modifier = Modifier.padding(vertical = 16.dp)
                     )
                 } else {
                     LazyRow(
                         horizontalArrangement = Arrangement.spacedBy(16.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        items(trendingSongs) { song ->
-                            TrendingSongCard(song = song) {
-                                viewModel.play(song, trendingSongs)
+                        items(recentlyPlayedSongs) { song ->
+                            RecentlyPlayedSongCard(song = song) {
+                                viewModel.play(song, recentlyPlayedSongs)
                             }
                         }
                     }
@@ -229,7 +221,7 @@ fun HomeScreen(
 }
 
 @Composable
-fun TrendingSongCard(
+fun RecentlyPlayedSongCard(
     song: SongEntity,
     onClick: () -> Unit
 ) {

@@ -1,9 +1,11 @@
 <resources>
-    <string name="app_name">NovaPlayer</string>
+    <string name="app_name">NovaMusic</string>
     <string name="discover_nova">DISCOVER NOVA</string>
     <string name="drive_mode_desc">Drive Mode</string>
     <string name="select_genre">SELECT GENRE</string>
     <string name="trending_music">TRENDING MUSIC</string>
+    <string name="recently_played">RECENTLY PLAYED</string>
+    <string name="no_recently_played">No recently played songs yet</string>
     <string name="failed_to_load_music">Failed to load music. Check your internet connection.</string>
     <string name="your_favorites">YOUR FAVORITES</string>
     <string name="no_favorites_yet">You don\'t have any favorite songs yet.</string>
