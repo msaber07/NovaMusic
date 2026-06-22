@@ -61,11 +61,18 @@ class MusicRepository(private val context: Context) {
     private fun checkUrlWorks(url: String): Boolean {
         log("Testing URL: $url")
         return try {
-            val request = Request.Builder()
-                .url(url)
-                .head()
-                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-                .build()
+            val requestBuilder = Request.Builder().url(url)
+            
+            if (url.contains("googlevideo.com")) {
+                requestBuilder.get()
+                requestBuilder.header("User-Agent", "com.google.android.youtube/20.10.38 (Linux; U; Android 10; en_US;)")
+                requestBuilder.header("Range", "bytes=0-500000")
+            } else {
+                requestBuilder.head()
+                requestBuilder.header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+            }
+            
+            val request = requestBuilder.build()
             
             val tempClient = okHttpClient.newBuilder()
                 .connectTimeout(4000, java.util.concurrent.TimeUnit.MILLISECONDS)
@@ -101,12 +108,18 @@ class MusicRepository(private val context: Context) {
         }
     }
 
-    private val okHttpClient = OkHttpClient.Builder()
+    val okHttpClient = OkHttpClient.Builder()
+        .protocols(listOf(okhttp3.Protocol.HTTP_1_1))
         .addInterceptor { chain ->
             val original = chain.request()
-            val request = original.newBuilder()
-                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-                .build()
+            val hasUserAgent = original.header("User-Agent") != null
+            val request = if (hasUserAgent) {
+                original
+            } else {
+                original.newBuilder()
+                    .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+                    .build()
+            }
             chain.proceed(request)
         }
         .addInterceptor(HttpLoggingInterceptor().apply {
@@ -311,6 +324,180 @@ class MusicRepository(private val context: Context) {
         emit(emptyList())
     }.flowOn(Dispatchers.IO)
 
+    private fun fetchVisitorDataAndCookies(videoId: String): Pair<String?, String?> {
+        log("fetchVisitorDataAndCookies: Fetching watch page for $videoId...")
+        try {
+            val watchUrl = "https://www.youtube.com/watch?v=$videoId"
+            val browserUa = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            val request = Request.Builder()
+                .url(watchUrl)
+                .header("User-Agent", browserUa)
+                .build()
+                
+            val tempClient = okHttpClient.newBuilder()
+                .connectTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
+                .readTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
+                .followRedirects(true)
+                .followSslRedirects(true)
+                .build()
+                
+            tempClient.newCall(request).execute().use { response ->
+                if (response.isSuccessful) {
+                    val html = response.body?.string() ?: ""
+                    
+                    // Extract visitorData
+                    var visitorData: String? = null
+                    val pattern1 = java.util.regex.Pattern.compile("\"visitorData\"\\s*:\\s*\"([^\"]+)\"")
+                    val matcher1 = pattern1.matcher(html)
+                    if (matcher1.find()) {
+                        visitorData = matcher1.group(1)
+                    } else {
+                        val pattern2 = java.util.regex.Pattern.compile("VISITOR_DATA\\s*:\\s*\"([^\"]+)\"")
+                        val matcher2 = pattern2.matcher(html)
+                        if (matcher2.find()) {
+                            visitorData = matcher2.group(1)
+                        }
+                    }
+                    
+                    // Extract cookies
+                    val cookieList = mutableListOf<String>()
+                    val headersMap = response.headers
+                    for (i in 0 until headersMap.size) {
+                        if (headersMap.name(i).equals("Set-Cookie", ignoreCase = true)) {
+                            val value = headersMap.value(i)
+                            val parts = value.split(";")
+                            if (parts.isNotEmpty()) {
+                                cookieList.add(parts[0])
+                            }
+                        }
+                    }
+                    val cookies = if (cookieList.isNotEmpty()) cookieList.joinToString("; ") else null
+                    
+                    log("  visitorData extracted: ${visitorData?.take(30)}... cookies count: ${cookieList.size}")
+                    return Pair(visitorData, cookies)
+                } else {
+                    log("  watch page fetch failed: ${response.code}")
+                }
+            }
+        } catch (e: Exception) {
+            log("  watch page fetch error: ${e.message}")
+            e.printStackTrace()
+        }
+        return Pair(null, null)
+    }
+
+    private suspend fun resolveStreamUrlViaInnerTube(videoId: String): String? = withContext(Dispatchers.IO) {
+        log("resolveStreamUrlViaInnerTube: Resolving $videoId via InnerTube ANDROID_VR API...")
+        try {
+            val (visitorData, cookies) = fetchVisitorDataAndCookies(videoId)
+            
+            val url = "https://www.youtube.com/youtubei/v1/player"
+            val mediaType = "application/json; charset=utf-8".toMediaTypeOrNull()
+            
+            // Construct context JSON
+            val visitorDataField = if (visitorData != null) ",\"visitorData\": \"$visitorData\"" else ""
+            
+            val jsonPayload = """
+                {
+                    "videoId": "$videoId",
+                    "context": {
+                        "client": {
+                            "clientName": "ANDROID_VR",
+                            "clientVersion": "1.65.10",
+                            "deviceMake": "Oculus",
+                            "deviceModel": "Quest 3",
+                            "androidSdkVersion": 32,
+                            "osName": "Android",
+                            "osVersion": "12L",
+                            "hl": "en",
+                            "gl": "US",
+                            "utcOffsetMinutes": 0
+                            $visitorDataField
+                        }
+                    }
+                }
+            """.trimIndent()
+            
+            val requestBody = jsonPayload.toRequestBody(mediaType)
+            val playerUa = "com.google.android.apps.youtube.vr.oculus/1.65.10 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip"
+            
+            val requestBuilder = Request.Builder()
+                .url(url)
+                .post(requestBody)
+                .header("Content-Type", "application/json")
+                .header("User-Agent", playerUa)
+                .header("X-YouTube-Client-Name", "28")
+                .header("X-YouTube-Client-Version", "1.65.10")
+                .header("Origin", "https://www.youtube.com")
+                .header("Accept", "application/json")
+                
+            if (visitorData != null) {
+                requestBuilder.header("X-Goog-Visitor-Id", visitorData)
+            }
+            if (cookies != null) {
+                requestBuilder.header("Cookie", cookies)
+            }
+            
+            val request = requestBuilder.build()
+            
+            val tempClient = okHttpClient.newBuilder()
+                .connectTimeout(6, java.util.concurrent.TimeUnit.SECONDS)
+                .readTimeout(6, java.util.concurrent.TimeUnit.SECONDS)
+                .build()
+                
+            tempClient.newCall(request).execute().use { response ->
+                log("  InnerTube response code: ${response.code}")
+                if (response.isSuccessful) {
+                    val bodyStr = response.body?.string() ?: ""
+                    if (bodyStr.isNotEmpty()) {
+                        val json = com.google.gson.JsonParser().parse(bodyStr).asJsonObject
+                        
+                        val playabilityStatus = json.getAsJsonObject("playabilityStatus")
+                        val status = playabilityStatus?.get("status")?.asString
+                        if (status != null && status != "OK") {
+                            val reason = playabilityStatus.get("reason")?.asString ?: "Unknown restriction"
+                            log("  InnerTube playback check: Video playability status is $status ($reason)")
+                        }
+                        
+                        val streamingData = json.getAsJsonObject("streamingData")
+                        if (streamingData != null) {
+                            val adaptiveFormats = streamingData.getAsJsonArray("adaptiveFormats")
+                            if (adaptiveFormats != null && adaptiveFormats.size() > 0) {
+                                var selectedUrl: String? = null
+                                
+                                for (element in adaptiveFormats) {
+                                    val fmt = element.asJsonObject
+                                    val mimeType = fmt.get("mimeType")?.asString ?: ""
+                                    if (mimeType.contains("audio")) {
+                                        val streamUrl = fmt.get("url")?.asString
+                                        if (!streamUrl.isNullOrEmpty()) {
+                                            selectedUrl = streamUrl
+                                            log("  InnerTube found audio stream: mimeType=$mimeType, bitrate=${fmt.get("bitrate")?.asInt}")
+                                            if (mimeType.contains("audio/mp4") || mimeType.contains("audio/m4a")) {
+                                                break
+                                            }
+                                        }
+                                    }
+                                }
+                                
+                                if (selectedUrl != null) {
+                                    log("  InnerTube successfully resolved url (length: ${selectedUrl.length})")
+                                    return@withContext selectedUrl
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    log("  InnerTube request failed: ${response.message}")
+                }
+            }
+        } catch (e: Exception) {
+            log("  InnerTube resolution failed with exception: ${e.message}")
+            e.printStackTrace()
+        }
+        null
+    }
+
     suspend fun resolveStreamUrl(songId: String): String = withContext(Dispatchers.IO) {
         log("Resolving stream URL for songId: $songId")
         resolutionStatus.value = "Çözümleniyor..."
@@ -321,6 +508,23 @@ class MusicRepository(private val context: Context) {
             }
             val videoId = songId.removePrefix("yt_")
             
+            // 0. Try custom InnerTube resolver first (keep fallback system intact as requested)
+            try {
+                val innerTubeUrl = resolveStreamUrlViaInnerTube(videoId)
+                if (!innerTubeUrl.isNullOrBlank()) {
+                    log("  InnerTube resolved URL: $innerTubeUrl, validating stream connectivity...")
+                    if (checkUrlWorks(innerTubeUrl)) {
+                        log("  Successfully resolved and verified via custom InnerTube: $innerTubeUrl")
+                        return@withContext innerTubeUrl
+                    } else {
+                        log("  Custom InnerTube URL failed validation check (returned 403 or failed). Skipping...")
+                    }
+                }
+            } catch (e: Exception) {
+                log("  Custom InnerTube resolution error: ${e.message}")
+                e.printStackTrace()
+            }
+
             // 1. Try NewPipe Extractor first
             try {
                 if (!isNewPipeInitialized) {
@@ -365,8 +569,13 @@ class MusicRepository(private val context: Context) {
             }
             
             if (!extractedUrl.isNullOrBlank()) {
-                log("  Successfully resolved via NewPipe: $extractedUrl")
-                return@withContext extractedUrl!!
+                log("  NewPipe extracted URL: $extractedUrl, validating stream connectivity...")
+                if (checkUrlWorks(extractedUrl!!)) {
+                    log("  Successfully resolved and verified via NewPipe: $extractedUrl")
+                    return@withContext extractedUrl!!
+                } else {
+                    log("  NewPipe URL failed validation check. Skipping...")
+                }
             }
             
             // 2. Try active cached base URL first as fallback
@@ -931,7 +1140,11 @@ class MusicRepository(private val context: Context) {
             }
             if (downloadUrl.isBlank()) return@withContext false
 
-            val request = Request.Builder().url(downloadUrl).build()
+            val request = Request.Builder()
+                .url(downloadUrl)
+                .header("User-Agent", "com.google.android.youtube/20.10.38 (Linux; U; Android 10; en_US;)")
+                .header("Range", "bytes=0-")
+                .build()
             val response = okHttpClient.newCall(request).execute()
             if (!response.isSuccessful) return@withContext false
 

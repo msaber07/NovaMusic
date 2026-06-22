@@ -86,6 +86,7 @@ dependencies {
   // Media3 ExoPlayer & Session
   implementation(libs.androidx.media3.exoplayer)
   implementation(libs.androidx.media3.session)
+  implementation("androidx.media3:media3-datasource-okhttp:1.5.1")
 
   // Room Database
   implementation(libs.androidx.room.runtime)

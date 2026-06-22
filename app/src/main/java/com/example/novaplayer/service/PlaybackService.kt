@@ -296,9 +296,11 @@ class PlaybackService : MediaLibraryService() {
             .setUsage(C.USAGE_MEDIA)
             .build()
 
-        val httpDataSourceFactory = DefaultHttpDataSource.Factory()
-            .setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-            .setAllowCrossProtocolRedirects(true)
+        val httpDataSourceFactory = androidx.media3.datasource.okhttp.OkHttpDataSource.Factory(repository.okHttpClient)
+            .setUserAgent("com.google.android.youtube/20.10.38 (Linux; U; Android 10; en_US;)")
+            .setDefaultRequestProperties(mapOf(
+                "Range" to "bytes=0-"
+            ))
 
         val defaultDataSourceFactory = DefaultDataSource.Factory(this, httpDataSourceFactory)
 
