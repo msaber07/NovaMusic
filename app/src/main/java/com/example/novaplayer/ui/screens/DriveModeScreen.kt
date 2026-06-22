@@ -43,6 +43,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.example.novaplayer.data.local.SongEntity
+import androidx.compose.ui.res.stringResource
+import com.example.novaplayer.R
 import com.example.novaplayer.theme.*
 import com.example.novaplayer.ui.viewmodel.MusicViewModel
 import kotlinx.coroutines.flow.first
@@ -88,7 +90,7 @@ fun DriveModeScreen(
                 isSearching = true
                 viewModel.search(spokenText)
                 
-                android.widget.Toast.makeText(context, "\"$spokenText\" aranıyor ve çalınıyor...", android.widget.Toast.LENGTH_SHORT).show()
+                android.widget.Toast.makeText(context, context.getString(R.string.voice_searching_and_playing, spokenText), android.widget.Toast.LENGTH_SHORT).show()
                 coroutineScope.launch {
                     try {
                         withTimeout(5000) {
@@ -101,7 +103,7 @@ fun DriveModeScreen(
                             }
                         }
                     } catch (e: Exception) {
-                        android.widget.Toast.makeText(context, "Bulunamadı: $spokenText", android.widget.Toast.LENGTH_SHORT).show()
+                        android.widget.Toast.makeText(context, context.getString(R.string.not_found_param, spokenText), android.widget.Toast.LENGTH_SHORT).show()
                     }
                 }
             }
@@ -161,7 +163,7 @@ fun DriveModeScreen(
                     )
                     Spacer(modifier = Modifier.width(10.dp))
                     Text(
-                        text = "NEO DRIVE",
+                        text = stringResource(R.string.drive_mode_title),
                         color = NeonOrange,
                         fontSize = 18.sp,
                         fontWeight = FontWeight.Bold,
@@ -177,7 +179,7 @@ fun DriveModeScreen(
                 ) {
                     Icon(
                         imageVector = Icons.Default.Close,
-                        contentDescription = "Çıkış",
+                        contentDescription = stringResource(R.string.exit_desc),
                         tint = NeonOrange
                     )
                 }
@@ -200,7 +202,7 @@ fun DriveModeScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = "ARAMA SONUÇLARI",
+                                text = stringResource(R.string.search_results),
                                 color = TextSecondary,
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold
@@ -210,14 +212,14 @@ fun DriveModeScreen(
                                 isSearching = false
                                 focusManager.clearFocus()
                             }) {
-                                Text("İptal", color = NeonPink, fontSize = 14.sp)
+                                Text(stringResource(R.string.cancel), color = NeonPink, fontSize = 14.sp)
                             }
                         }
 
                         if (searchResults.isEmpty()) {
                             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                 Text(
-                                    text = "Sonuç yok. Farklı aratın veya mikrofonu kullanın.",
+                                    text = stringResource(R.string.drive_no_results),
                                     color = TextSecondary,
                                     fontSize = 14.sp,
                                     textAlign = TextAlign.Center
@@ -311,21 +313,21 @@ fun DriveModeScreen(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(
-                                    text = "OYNATMA SIRASI",
+                                    text = stringResource(R.string.playback_queue),
                                     color = NeonOrange,
                                     fontSize = 14.sp,
                                     fontWeight = FontWeight.Bold,
                                     letterSpacing = 2.sp
                                 )
                                 TextButton(onClick = { showQueue = false }) {
-                                    Text("İptal", color = NeonPink, fontSize = 14.sp)
+                                    Text(stringResource(R.string.cancel), color = NeonPink, fontSize = 14.sp)
                                 }
                             }
 
                             if (queue.isEmpty()) {
                                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                     Text(
-                                        text = "Sırada şarkı yok.",
+                                        text = stringResource(R.string.no_songs_in_queue),
                                         color = TextSecondary,
                                         fontSize = 14.sp
                                     )
@@ -462,7 +464,7 @@ fun DriveModeScreen(
                                 ) {
                                     Icon(
                                         imageVector = if (currentSong?.isFavorite == true) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                                        contentDescription = "Favori",
+                                        contentDescription = stringResource(R.string.favorite_desc),
                                         tint = if (currentSong?.isFavorite == true) NeonPink else NeonOrange,
                                         modifier = Modifier.size(26.dp)
                                     )
@@ -473,7 +475,7 @@ fun DriveModeScreen(
                                     horizontalAlignment = Alignment.CenterHorizontally
                                 ) {
                                     Text(
-                                        text = currentSong?.title ?: "Müzik Çalmıyor",
+                                        text = currentSong?.title ?: stringResource(R.string.no_music_playing),
                                         color = TextPrimary,
                                         fontSize = 20.sp,
                                         fontWeight = FontWeight.Bold,
@@ -486,7 +488,7 @@ fun DriveModeScreen(
                                     Spacer(modifier = Modifier.height(4.dp))
 
                                     Text(
-                                        text = currentSong?.artistName ?: "Yola odaklanın, müzik seçin.",
+                                        text = currentSong?.artistName ?: stringResource(R.string.drive_mode_instruction),
                                         color = NeonOrange,
                                         fontSize = 14.sp,
                                         fontWeight = FontWeight.SemiBold,
@@ -507,7 +509,7 @@ fun DriveModeScreen(
                                 ) {
                                     Icon(
                                         imageVector = Icons.Default.QueueMusic,
-                                        contentDescription = "Sıra",
+                                        contentDescription = stringResource(R.string.queue_desc),
                                         tint = NeonOrange,
                                         modifier = Modifier.size(26.dp)
                                     )
@@ -536,7 +538,7 @@ fun DriveModeScreen(
                 ) {
                     Icon(
                         imageVector = Icons.Default.SkipPrevious,
-                        contentDescription = "Önceki",
+                        contentDescription = stringResource(R.string.previous_desc),
                         tint = TextPrimary,
                         modifier = Modifier.size(36.dp)
                     )
@@ -555,7 +557,7 @@ fun DriveModeScreen(
                 ) {
                     Icon(
                         imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                        contentDescription = "Oynat/Durdur",
+                        contentDescription = stringResource(R.string.play_pause_desc),
                         tint = NeonOrange,
                         modifier = Modifier.size(54.dp)
                     )
@@ -571,7 +573,7 @@ fun DriveModeScreen(
                 ) {
                     Icon(
                         imageVector = Icons.Default.SkipNext,
-                        contentDescription = "Sonraki",
+                        contentDescription = stringResource(R.string.next_desc),
                         tint = TextPrimary,
                         modifier = Modifier.size(36.dp)
                     )
@@ -596,7 +598,7 @@ fun DriveModeScreen(
                             isSearching = it.isNotEmpty()
                             viewModel.search(it)
                         },
-                        placeholder = { Text("Kılavuz Arama...", color = TextSecondary, fontSize = 16.sp) },
+                        placeholder = { Text(stringResource(R.string.drive_search_placeholder), color = TextSecondary, fontSize = 16.sp) },
                         leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = NeonOrange) },
                         trailingIcon = {
                             if (searchQuery.isNotEmpty()) {
@@ -644,18 +646,18 @@ fun DriveModeScreen(
                                     val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                                         putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
                                         putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
-                                        putExtra(RecognizerIntent.EXTRA_PROMPT, "Şarkı veya sanatçı adı söyleyin...")
+                                        putExtra(RecognizerIntent.EXTRA_PROMPT, context.getString(R.string.voice_search_prompt))
                                     }
                                     voiceSearchLauncher.launch(intent)
                                 } catch (e: Exception) {
-                                    android.widget.Toast.makeText(context, "Cihazda ses tanıma desteklenmiyor.", android.widget.Toast.LENGTH_SHORT).show()
+                                    android.widget.Toast.makeText(context, context.getString(R.string.voice_search_not_supported), android.widget.Toast.LENGTH_SHORT).show()
                                 }
                             },
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             imageVector = Icons.Default.Mic,
-                            contentDescription = "Sesli Arama",
+                            contentDescription = stringResource(R.string.voice_search_desc),
                             tint = NeonOrange,
                             modifier = Modifier.size(28.dp)
                         )
@@ -683,9 +685,9 @@ fun DriveModeScreen(
                             .clickable {
                                 if (favoriteSongs.isNotEmpty()) {
                                     viewModel.play(favoriteSongs.first(), favoriteSongs)
-                                    android.widget.Toast.makeText(context, "Favoriler çalınıyor", android.widget.Toast.LENGTH_SHORT).show()
+                                    android.widget.Toast.makeText(context, context.getString(R.string.playing_favorites), android.widget.Toast.LENGTH_SHORT).show()
                                 } else {
-                                    android.widget.Toast.makeText(context, "Favori şarkınız bulunmuyor", android.widget.Toast.LENGTH_SHORT).show()
+                                    android.widget.Toast.makeText(context, context.getString(R.string.no_favorites_found), android.widget.Toast.LENGTH_SHORT).show()
                                 }
                             },
                         contentAlignment = Alignment.Center
@@ -702,7 +704,7 @@ fun DriveModeScreen(
                             )
                             Spacer(modifier = Modifier.width(10.dp))
                             Text(
-                                text = "FAVORİLERİ ÇAL",
+                                text = stringResource(R.string.play_favorites_btn),
                                 color = TextPrimary,
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold,
@@ -727,9 +729,9 @@ fun DriveModeScreen(
                             .clickable {
                                 if (downloadedSongs.isNotEmpty()) {
                                     viewModel.play(downloadedSongs.first(), downloadedSongs)
-                                    android.widget.Toast.makeText(context, "İndirilenler çalınıyor", android.widget.Toast.LENGTH_SHORT).show()
+                                    android.widget.Toast.makeText(context, context.getString(R.string.playing_downloads), android.widget.Toast.LENGTH_SHORT).show()
                                 } else {
-                                    android.widget.Toast.makeText(context, "İndirilmiş şarkınız bulunmuyor", android.widget.Toast.LENGTH_SHORT).show()
+                                    android.widget.Toast.makeText(context, context.getString(R.string.no_downloads_found), android.widget.Toast.LENGTH_SHORT).show()
                                 }
                             },
                         contentAlignment = Alignment.Center
@@ -746,7 +748,7 @@ fun DriveModeScreen(
                             )
                             Spacer(modifier = Modifier.width(10.dp))
                             Text(
-                                text = "İNDİRİLENLERİ ÇAL",
+                                text = stringResource(R.string.play_downloads_btn),
                                 color = TextPrimary,
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold,

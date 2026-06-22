@@ -28,6 +28,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.example.novaplayer.data.local.SongEntity
+import androidx.compose.ui.res.stringResource
+import com.example.novaplayer.R
 import com.example.novaplayer.theme.*
 import com.example.novaplayer.ui.viewmodel.MusicViewModel
 
@@ -48,7 +50,7 @@ fun SearchScreen(viewModel: MusicViewModel) {
             .padding(16.dp)
     ) {
         Text(
-            text = "NEO ARA",
+            text = stringResource(R.string.search_title),
             color = NeonCyan,
             fontSize = 22.sp,
             fontWeight = FontWeight.Bold,
@@ -63,7 +65,7 @@ fun SearchScreen(viewModel: MusicViewModel) {
                 query = it
                 viewModel.search(it)
             },
-            placeholder = { Text("Müzik, Sanatçı Ara...", color = TextSecondary) },
+            placeholder = { Text(stringResource(R.string.search_placeholder), color = TextSecondary) },
             leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = NeonCyan) },
             trailingIcon = {
                 if (query.isNotEmpty()) {
@@ -119,7 +121,7 @@ fun SearchScreen(viewModel: MusicViewModel) {
                     )
                     Spacer(modifier = Modifier.height(12.dp))
                     Text(
-                        text = if (query.isEmpty()) "Hemen arama yapın" else "Bulunamadı. Farklı bir şey arayın.",
+                        text = if (query.isEmpty()) stringResource(R.string.search_start_prompt) else stringResource(R.string.search_no_results),
                         color = TextSecondary,
                         fontSize = 14.sp
                     )
@@ -179,7 +181,7 @@ fun SearchSongItem(
                 if (isFailed) {
                     android.widget.Toast.makeText(
                         context,
-                        "Bu şarkı telif veya kısıtlamalar nedeniyle oynatılamıyor.",
+                        context.getString(R.string.song_unplayable_toast),
                         android.widget.Toast.LENGTH_SHORT
                     ).show()
                 } else {

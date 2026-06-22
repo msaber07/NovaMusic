@@ -28,6 +28,7 @@ import com.yushosei.newpipe.util.DefaultDownloaderImpl
 import java.io.File
 import java.io.FileOutputStream
 import java.util.UUID
+import com.example.novaplayer.R
 
 class MusicRepository(private val context: Context) {
 
@@ -500,7 +501,7 @@ class MusicRepository(private val context: Context) {
 
     suspend fun resolveStreamUrl(songId: String): String = withContext(Dispatchers.IO) {
         log("Resolving stream URL for songId: $songId")
-        resolutionStatus.value = "Çözümleniyor..."
+        resolutionStatus.value = context.getString(R.string.status_resolving)
         try {
             if (!songId.startsWith("yt_")) {
                 log("  songId does not start with yt_")
@@ -529,7 +530,7 @@ class MusicRepository(private val context: Context) {
             try {
                 if (!isNewPipeInitialized) {
                     log("  Initializing NewPipe Extractor...")
-                    resolutionStatus.value = "Sistem hazırlanıyor..."
+                    resolutionStatus.value = context.getString(R.string.status_system_preparing)
                     NewPipe.init(DefaultDownloaderImpl.initDefault())
                     isNewPipeInitialized = true
                     log("  NewPipe Extractor initialized successfully.")
@@ -541,7 +542,7 @@ class MusicRepository(private val context: Context) {
 
             var extractedUrl: String? = null
             log("  Attempting NewPipe extraction for videoId: $videoId")
-            resolutionStatus.value = "YouTube'dan çözümleniyor..."
+            resolutionStatus.value = context.getString(R.string.status_resolving_youtube)
             try {
                 val service = ServiceList.YouTube
                 val extractor = service.getStreamExtractor("https://www.youtube.com/watch?v=$videoId")
@@ -580,7 +581,7 @@ class MusicRepository(private val context: Context) {
             
             // 2. Try active cached base URL first as fallback
             log("  Local extractor failed/not found. Trying active cached Invidious URL...")
-            resolutionStatus.value = "Alternatif sunucu aranıyor..."
+            resolutionStatus.value = context.getString(R.string.status_searching_alternative)
             val activeUrl = activeInvidiousBaseUrl
             val activeStreamUrl = "$activeUrl/latest_version?id=$videoId&itag=140&local=true"
             if (checkUrlWorks(activeStreamUrl)) {
@@ -590,7 +591,7 @@ class MusicRepository(private val context: Context) {
             
             // 3. Probe other invidious instances in parallel!
             log("  Active URL failed. Probing other Invidious instances in parallel...")
-            resolutionStatus.value = "Sunucular taranıyor..."
+            resolutionStatus.value = context.getString(R.string.status_scanning_servers)
             val workingBase = coroutineScope {
                 val deferreds = invidiousInstances.map { base ->
                     async {
@@ -613,7 +614,7 @@ class MusicRepository(private val context: Context) {
             
             // 4. Fallback: try Cobalt APIs in parallel if all Invidious instances fail
             log("  All Invidious instances failed. Trying Cobalt in parallel...")
-            resolutionStatus.value = "Yedek tünel kuruluyor..."
+            resolutionStatus.value = context.getString(R.string.status_establishing_backup)
             val cobaltApis = listOf(
                 "https://rue-cobalt.xenon.zone/",
                 "https://cobaltapi.kittycat.boo/"

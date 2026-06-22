@@ -29,6 +29,8 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation3.runtime.NavKey
 import coil.compose.AsyncImage
+import androidx.compose.ui.res.stringResource
+import com.example.novaplayer.R
 import com.example.novaplayer.theme.*
 import com.example.novaplayer.ui.components.PlayerSheet
 import com.example.novaplayer.ui.screens.HomeScreen
@@ -141,7 +143,7 @@ fun MainScreen(
                             ) {
                                 Icon(
                                     imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                                    contentDescription = "Oynat/Durdur",
+                                    contentDescription = stringResource(R.string.play_pause_desc),
                                     tint = NeonCyan,
                                     modifier = Modifier.size(18.dp)
                                 )
@@ -153,7 +155,7 @@ fun MainScreen(
                             IconButton(onClick = { viewModel.seekTo(0); viewModel.togglePlayPause() }) {
                                 Icon(
                                     imageVector = Icons.Default.SkipNext,
-                                    contentDescription = "Sonraki",
+                                    contentDescription = stringResource(R.string.next_desc),
                                     tint = TextSecondary,
                                     modifier = Modifier.size(20.dp)
                                 )
@@ -174,8 +176,8 @@ fun MainScreen(
                     NavigationBarItem(
                         selected = selectedTab == 0,
                         onClick = { selectedTab = 0 },
-                        icon = { Icon(Icons.Default.Home, contentDescription = "Keşfet") },
-                        label = { Text("Keşfet", fontSize = 11.sp) },
+                        icon = { Icon(Icons.Default.Home, contentDescription = stringResource(R.string.discover_tab_desc)) },
+                        label = { Text(stringResource(R.string.discover_tab), fontSize = 11.sp) },
                         colors = NavigationBarItemDefaults.colors(
                             selectedIconColor = NeonCyan,
                             selectedTextColor = NeonCyan,
@@ -187,8 +189,8 @@ fun MainScreen(
                     NavigationBarItem(
                         selected = selectedTab == 1,
                         onClick = { selectedTab = 1 },
-                        icon = { Icon(Icons.Default.Search, contentDescription = "Ara") },
-                        label = { Text("Ara", fontSize = 11.sp) },
+                        icon = { Icon(Icons.Default.Search, contentDescription = stringResource(R.string.search_tab_desc)) },
+                        label = { Text(stringResource(R.string.search_tab), fontSize = 11.sp) },
                         colors = NavigationBarItemDefaults.colors(
                             selectedIconColor = NeonCyan,
                             selectedTextColor = NeonCyan,
@@ -200,8 +202,8 @@ fun MainScreen(
                     NavigationBarItem(
                         selected = selectedTab == 2,
                         onClick = { selectedTab = 2 },
-                        icon = { Icon(Icons.Default.LibraryMusic, contentDescription = "Kitaplık") },
-                        label = { Text("Kitaplık", fontSize = 11.sp) },
+                        icon = { Icon(Icons.Default.LibraryMusic, contentDescription = stringResource(R.string.library_tab_desc)) },
+                        label = { Text(stringResource(R.string.library_tab), fontSize = 11.sp) },
                         colors = NavigationBarItemDefaults.colors(
                             selectedIconColor = NeonCyan,
                             selectedTextColor = NeonCyan,

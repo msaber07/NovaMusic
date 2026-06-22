@@ -32,6 +32,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.example.novaplayer.data.local.SongEntity
+import androidx.compose.ui.res.stringResource
+import com.example.novaplayer.R
 import com.example.novaplayer.theme.*
 import com.example.novaplayer.ui.components.neonGlow
 import com.example.novaplayer.ui.viewmodel.MusicViewModel
@@ -63,7 +65,7 @@ fun HomeScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "NOVA KEŞFET",
+                    text = stringResource(R.string.discover_nova),
                     color = NeonCyan,
                     fontSize = 24.sp,
                     fontWeight = FontWeight.Bold,
@@ -77,7 +79,7 @@ fun HomeScreen(
                 ) {
                     Icon(
                         imageVector = Icons.Default.DirectionsCar,
-                        contentDescription = "Araç Modu",
+                        contentDescription = stringResource(R.string.drive_mode_desc),
                         tint = NeonOrange,
                         modifier = Modifier.size(20.dp)
                     )
@@ -89,7 +91,7 @@ fun HomeScreen(
         item {
             Column {
                 Text(
-                    text = "TARZ SEÇİN",
+                    text = stringResource(R.string.select_genre),
                     color = TextSecondary,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
@@ -130,7 +132,7 @@ fun HomeScreen(
         item {
             Column {
                 Text(
-                    text = "TREND MÜZİKLER",
+                    text = stringResource(R.string.trending_music),
                     color = TextSecondary,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
@@ -149,7 +151,7 @@ fun HomeScreen(
                     }
                 } else if (trendingSongs.isEmpty()) {
                     Text(
-                        text = "Müzikler yüklenemedi. İnternetinizi kontrol edin.",
+                        text = stringResource(R.string.failed_to_load_music),
                         color = TextSecondary,
                         fontSize = 13.sp
                     )
@@ -172,7 +174,7 @@ fun HomeScreen(
         item {
             Column {
                 Text(
-                    text = "FAVORİLERİNİZ",
+                    text = stringResource(R.string.your_favorites),
                     color = TextSecondary,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
@@ -198,12 +200,12 @@ fun HomeScreen(
                             )
                             Spacer(modifier = Modifier.height(8.dp))
                             Text(
-                                text = "Henüz favori şarkınız yok.",
+                                text = stringResource(R.string.no_favorites_yet),
                                 color = TextSecondary,
                                 fontSize = 13.sp
                             )
                             Text(
-                                text = "Arama ekranından bulup kalp simgesine dokunun.",
+                                text = stringResource(R.string.find_and_favorite_instruction),
                                 color = TextDim,
                                 fontSize = 11.sp,
                                 modifier = Modifier.padding(top = 4.dp)
@@ -373,7 +375,7 @@ fun FavoriteSongRow(
         if (song.isDownloaded) {
             Icon(
                 imageVector = Icons.Default.OfflineBolt,
-                contentDescription = "Cihazda Kayıtlı",
+                contentDescription = stringResource(R.string.saved_on_device),
                 tint = NeonGreen,
                 modifier = Modifier
                     .padding(horizontal = 8.dp)

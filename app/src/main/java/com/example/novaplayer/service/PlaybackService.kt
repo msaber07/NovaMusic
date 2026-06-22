@@ -35,6 +35,7 @@ import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.TransferListener
 import android.net.Uri
+import com.example.novaplayer.R
 
 class PlaybackService : MediaLibraryService() {
 
@@ -96,7 +97,7 @@ class PlaybackService : MediaLibraryService() {
                                     .setMediaId("favorites")
                                     .setMediaMetadata(
                                         MediaMetadata.Builder()
-                                            .setTitle("Favoriler")
+                                            .setTitle(getString(R.string.favorites))
                                             .setFolderType(MediaMetadata.FOLDER_TYPE_MIXED)
                                             .setIsPlayable(false)
                                             .build()
@@ -106,7 +107,7 @@ class PlaybackService : MediaLibraryService() {
                                     .setMediaId("downloads")
                                     .setMediaMetadata(
                                         MediaMetadata.Builder()
-                                            .setTitle("İndirilenler")
+                                            .setTitle(getString(R.string.downloads))
                                             .setFolderType(MediaMetadata.FOLDER_TYPE_MIXED)
                                             .setIsPlayable(false)
                                             .build()
@@ -116,7 +117,7 @@ class PlaybackService : MediaLibraryService() {
                                     .setMediaId("playlists")
                                     .setMediaMetadata(
                                         MediaMetadata.Builder()
-                                            .setTitle("Oynatma Listeleri")
+                                            .setTitle(getString(R.string.playlists))
                                             .setFolderType(MediaMetadata.FOLDER_TYPE_MIXED)
                                             .setIsPlayable(false)
                                             .build()

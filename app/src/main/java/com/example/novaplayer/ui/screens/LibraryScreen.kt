@@ -24,6 +24,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.res.stringResource
+import com.example.novaplayer.R
 import coil.compose.AsyncImage
 import com.example.novaplayer.data.local.PlaylistEntity
 import com.example.novaplayer.data.local.PlaylistWithSongs
@@ -52,7 +54,7 @@ fun LibraryScreen(viewModel: MusicViewModel) {
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = "KİTAPLIĞIM",
+                text = stringResource(R.string.library_title),
                 color = NeonCyan,
                 fontSize = 22.sp,
                 fontWeight = FontWeight.Bold,
@@ -68,7 +70,7 @@ fun LibraryScreen(viewModel: MusicViewModel) {
                 ) {
                     Icon(
                         imageVector = Icons.Default.Add,
-                        contentDescription = "Oynatma Listesi Ekle",
+                        contentDescription = stringResource(R.string.add_playlist_desc),
                         tint = NeonPurple
                     )
                 }
@@ -85,14 +87,14 @@ fun LibraryScreen(viewModel: MusicViewModel) {
                 .padding(4.dp)
         ) {
             TabButton(
-                text = "Cihazımdakiler",
+                text = stringResource(R.string.tab_downloads),
                 isSelected = selectedTabIndex == 0,
                 modifier = Modifier.weight(1f)
             ) {
                 selectedTabIndex = 0
             }
             TabButton(
-                text = "Listelerim",
+                text = stringResource(R.string.tab_playlists),
                 isSelected = selectedTabIndex == 1,
                 modifier = Modifier.weight(1f)
             ) {
@@ -121,12 +123,12 @@ fun LibraryScreen(viewModel: MusicViewModel) {
                             )
                             Spacer(modifier = Modifier.height(12.dp))
                             Text(
-                                text = "İndirilmiş müzik bulunamadı.",
+                                text = stringResource(R.string.no_downloads_found),
                                 color = TextSecondary,
                                 fontSize = 14.sp
                             )
                             Text(
-                                text = "Arama ekranındaki müzikleri indirip\nçevrimdışı (reklamsız) dinleyebilirsiniz.",
+                                text = stringResource(R.string.downloads_instruction),
                                 color = TextDim,
                                 fontSize = 11.sp,
                                 modifier = Modifier.padding(top = 8.dp),
@@ -168,7 +170,7 @@ fun LibraryScreen(viewModel: MusicViewModel) {
                             )
                             Spacer(modifier = Modifier.height(12.dp))
                             Text(
-                                text = "Henüz oynatma listeniz yok.",
+                                text = stringResource(R.string.no_playlists_yet),
                                 color = TextSecondary,
                                 fontSize = 14.sp
                             )
@@ -178,7 +180,7 @@ fun LibraryScreen(viewModel: MusicViewModel) {
                                 colors = ButtonDefaults.buttonColors(containerColor = CyberSurface),
                                 border = BorderStroke(1.dp, NeonPurple)
                             ) {
-                                Text("Şimdi Oluştur", color = NeonPurple)
+                                Text(stringResource(R.string.create_now), color = NeonPurple)
                             }
                         }
                     }
@@ -219,7 +221,7 @@ fun LibraryScreen(viewModel: MusicViewModel) {
                     modifier = Modifier.padding(20.dp)
                 ) {
                     Text(
-                        text = "Yeni Liste Oluştur",
+                        text = stringResource(R.string.create_new_playlist),
                         color = NeonCyan,
                         fontSize = 18.sp,
                         fontWeight = FontWeight.Bold,
@@ -229,7 +231,7 @@ fun LibraryScreen(viewModel: MusicViewModel) {
                     OutlinedTextField(
                         value = name,
                         onValueChange = { name = it },
-                        label = { Text("Oynatma Listesi Adı", color = TextSecondary) },
+                        label = { Text(stringResource(R.string.playlist_name_label), color = TextSecondary) },
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = NeonCyan,
                             unfocusedBorderColor = CyberSurface,
@@ -244,7 +246,7 @@ fun LibraryScreen(viewModel: MusicViewModel) {
                     OutlinedTextField(
                         value = description,
                         onValueChange = { description = it },
-                        label = { Text("Açıklama (Opsiyonel)", color = TextSecondary) },
+                        label = { Text(stringResource(R.string.playlist_desc_label), color = TextSecondary) },
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = NeonCyan,
                             unfocusedBorderColor = CyberSurface,
@@ -261,7 +263,7 @@ fun LibraryScreen(viewModel: MusicViewModel) {
                         horizontalArrangement = Arrangement.End
                     ) {
                         TextButton(onClick = { showCreatePlaylistDialog = false }) {
-                            Text("İptal", color = TextSecondary)
+                            Text(stringResource(R.string.cancel), color = TextSecondary)
                         }
                         Spacer(modifier = Modifier.width(8.dp))
                         Button(
@@ -273,7 +275,7 @@ fun LibraryScreen(viewModel: MusicViewModel) {
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = NeonCyan)
                         ) {
-                            Text("Oluştur", color = CyberBlack)
+                            Text(stringResource(R.string.create), color = CyberBlack)
                         }
                     }
                 }
@@ -338,7 +340,7 @@ fun LibraryScreen(viewModel: MusicViewModel) {
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.PlayArrow,
-                                    contentDescription = "Hepsini Çal",
+                                    contentDescription = stringResource(R.string.play_all_desc),
                                     tint = TextPrimary
                                 )
                             }
@@ -357,7 +359,7 @@ fun LibraryScreen(viewModel: MusicViewModel) {
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
-                                text = "Bu listede henüz şarkı yok.\nŞarkı detayından ekleyebilirsiniz.",
+                                text = stringResource(R.string.no_songs_in_playlist),
                                 color = TextSecondary,
                                 fontSize = 13.sp,
                                 textAlign = TextAlign.Center
@@ -434,7 +436,7 @@ fun LibraryScreen(viewModel: MusicViewModel) {
                                     ) {
                                         Icon(
                                             imageVector = Icons.Default.Delete,
-                                            contentDescription = "Listeden Çıkar",
+                                            contentDescription = stringResource(R.string.remove_from_playlist_desc),
                                             tint = NeonPink,
                                             modifier = Modifier.size(18.dp)
                                         )
@@ -450,7 +452,7 @@ fun LibraryScreen(viewModel: MusicViewModel) {
                         onClick = { selectedPlaylistForDetail = null },
                         modifier = Modifier.align(Alignment.End)
                     ) {
-                        Text(text = "Kapat", color = NeonCyan)
+                        Text(text = stringResource(R.string.close), color = NeonCyan)
                     }
                 }
             }
@@ -548,7 +550,7 @@ fun DownloadedSongRow(
         IconButton(onClick = onDeleteClick) {
             Icon(
                 imageVector = Icons.Default.Delete,
-                contentDescription = "İndirmeyi Sil",
+                contentDescription = stringResource(R.string.delete_download_desc),
                 tint = NeonPink,
                 modifier = Modifier.size(20.dp)
             )
@@ -600,7 +602,7 @@ fun PlaylistRow(
             )
             Spacer(modifier = Modifier.height(2.dp))
             Text(
-                text = playlist.description ?: "Açıklama yok",
+                text = playlist.description ?: stringResource(R.string.no_description),
                 color = TextSecondary,
                 fontSize = 12.sp,
                 maxLines = 1,
@@ -611,7 +613,7 @@ fun PlaylistRow(
         IconButton(onClick = onDeleteClick) {
             Icon(
                 imageVector = Icons.Default.Delete,
-                contentDescription = "Listeyi Sil",
+                contentDescription = stringResource(R.string.delete_playlist_desc),
                 tint = NeonPink,
                 modifier = Modifier.size(20.dp)
             )

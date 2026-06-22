@@ -27,6 +27,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
+import com.example.novaplayer.R
 
 class MusicViewModel(context: Context) : ViewModel() {
 
@@ -80,7 +81,7 @@ class MusicViewModel(context: Context) : ViewModel() {
         if (status.isNotEmpty()) {
             status
         } else if (state == Player.STATE_BUFFERING) {
-            "Yükleniyor..."
+            appContext.getString(R.string.status_loading)
         } else {
             ""
         }
@@ -172,7 +173,7 @@ class MusicViewModel(context: Context) : ViewModel() {
                     viewModelScope.launch(Dispatchers.Main) {
                         android.widget.Toast.makeText(
                             appContext,
-                            "Bu şarkı telif veya kısıtlamalar nedeniyle oynatılamıyor.",
+                            appContext.getString(R.string.song_unplayable_toast),
                             android.widget.Toast.LENGTH_SHORT
                         ).show()
                     }

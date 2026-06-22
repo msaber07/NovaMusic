@@ -37,6 +37,8 @@ import com.example.novaplayer.data.local.SongEntity
 import com.example.novaplayer.theme.*
 import com.example.novaplayer.ui.viewmodel.MusicViewModel
 import androidx.activity.compose.BackHandler
+import androidx.compose.ui.res.stringResource
+import com.example.novaplayer.R
 
 @Composable
 fun PlayerSheet(
@@ -119,13 +121,13 @@ fun PlayerSheet(
                     ) {
                         Icon(
                             imageVector = Icons.Default.KeyboardArrowDown,
-                            contentDescription = "Geri",
+                            contentDescription = stringResource(R.string.back_desc),
                             tint = NeonCyan
                         )
                     }
 
                     Text(
-                        text = "NEO STREAM",
+                        text = stringResource(R.string.player_title),
                         color = NeonCyan,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
@@ -145,7 +147,7 @@ fun PlayerSheet(
                         ) {
                             Icon(
                                 imageVector = if (song.isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                                contentDescription = "Favori",
+                                contentDescription = stringResource(R.string.favorite_desc),
                                 tint = if (song.isFavorite) NeonPink else TextSecondary
                             )
                         }
@@ -164,7 +166,7 @@ fun PlayerSheet(
                         ) {
                             Icon(
                                 imageVector = Icons.Default.QueueMusic,
-                                contentDescription = "Sıra",
+                                contentDescription = stringResource(R.string.queue_desc),
                                 tint = if (showQueue) NeonCyan else TextSecondary
                             )
                         }
@@ -180,7 +182,7 @@ fun PlayerSheet(
                             .padding(top = 20.dp)
                     ) {
                         Text(
-                            text = "OYNATMA SIRASI",
+                            text = stringResource(R.string.playback_queue),
                             color = NeonCyan,
                             fontSize = 14.sp,
                             fontWeight = FontWeight.Bold,
@@ -190,7 +192,7 @@ fun PlayerSheet(
 
                         if (queue.isEmpty()) {
                             Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                                Text("Sırada şarkı yok", color = TextSecondary, fontSize = 14.sp)
+                                Text(stringResource(R.string.no_songs_in_queue), color = TextSecondary, fontSize = 14.sp)
                             }
                         } else {
                             LazyColumn(
@@ -264,7 +266,7 @@ fun PlayerSheet(
                                         if (isCurrent) {
                                             Icon(
                                                 imageVector = Icons.Default.VolumeUp,
-                                                contentDescription = "Çalıyor",
+                                                contentDescription = stringResource(R.string.playing_desc),
                                                 tint = NeonCyan,
                                                 modifier = Modifier.size(20.dp)
                                             )
@@ -284,7 +286,7 @@ fun PlayerSheet(
                                 .height(50.dp),
                             shape = RoundedCornerShape(12.dp)
                         ) {
-                            Text("Oynatıcıya Dön", color = NeonCyan, fontWeight = FontWeight.Bold)
+                            Text(stringResource(R.string.back_to_player), color = NeonCyan, fontWeight = FontWeight.Bold)
                         }
                     }
                 } else {
@@ -301,7 +303,7 @@ fun PlayerSheet(
                         if (!song.albumImageUrl.isNullOrBlank()) {
                             AsyncImage(
                                 model = song.albumImageUrl,
-                                contentDescription = "Albüm Görseli",
+                                contentDescription = stringResource(R.string.album_art_desc),
                                 contentScale = ContentScale.Crop,
                                 modifier = Modifier.fillMaxSize()
                             )
@@ -423,7 +425,7 @@ fun PlayerSheet(
                             } else {
                                 Icon(
                                     imageVector = if (song.isDownloaded) Icons.Default.DownloadDone else Icons.Default.Download,
-                                    contentDescription = "İndir",
+                                    contentDescription = stringResource(R.string.download_desc),
                                     tint = if (song.isDownloaded) NeonGreen else TextSecondary,
                                     modifier = Modifier.size(26.dp)
                                 )
@@ -434,7 +436,7 @@ fun PlayerSheet(
                         IconButton(onClick = { viewModel.skipToPrevious() }) {
                             Icon(
                                 imageVector = Icons.Default.SkipPrevious,
-                                contentDescription = "Önceki",
+                                contentDescription = stringResource(R.string.previous_desc),
                                 tint = TextPrimary,
                                 modifier = Modifier.size(36.dp)
                             )
@@ -453,7 +455,7 @@ fun PlayerSheet(
                         ) {
                             Icon(
                                 imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                                contentDescription = "Oynat/Durdur",
+                                contentDescription = stringResource(R.string.play_pause_desc),
                                 tint = NeonCyan,
                                 modifier = Modifier.size(40.dp)
                             )
@@ -463,7 +465,7 @@ fun PlayerSheet(
                         IconButton(onClick = { viewModel.skipToNext() }) {
                             Icon(
                                 imageVector = Icons.Default.SkipNext,
-                                contentDescription = "Sonraki",
+                                contentDescription = stringResource(R.string.next_desc),
                                 tint = TextPrimary,
                                 modifier = Modifier.size(36.dp)
                             )
@@ -473,7 +475,7 @@ fun PlayerSheet(
                         IconButton(onClick = { showPlaylistDialog = true }) {
                             Icon(
                                 imageVector = Icons.Default.PlaylistAdd,
-                                contentDescription = "Listeye Ekle",
+                                contentDescription = stringResource(R.string.add_to_playlist_desc),
                                 tint = TextSecondary,
                                 modifier = Modifier.size(26.dp)
                             )
@@ -500,7 +502,7 @@ fun PlayerSheet(
                     modifier = Modifier.padding(20.dp)
                 ) {
                     Text(
-                        text = "Oynatma Listesine Ekle",
+                        text = stringResource(R.string.add_to_playlist_title),
                         color = NeonCyan,
                         fontSize = 16.sp,
                         fontWeight = FontWeight.Bold,
@@ -509,7 +511,7 @@ fun PlayerSheet(
 
                     if (playlists.isEmpty()) {
                         Text(
-                            text = "Henüz oynatma listeniz yok. Kitaplık ekranından oluşturabilirsiniz.",
+                            text = stringResource(R.string.no_playlists_yet_add_msg),
                             color = TextSecondary,
                             fontSize = 14.sp,
                             modifier = Modifier.padding(vertical = 16.dp)
@@ -556,7 +558,7 @@ fun PlayerSheet(
                         onClick = { showPlaylistDialog = false },
                         modifier = Modifier.align(Alignment.End)
                     ) {
-                        Text(text = "Kapat", color = NeonPink)
+                        Text(text = stringResource(R.string.close), color = NeonPink)
                     }
                 }
             }
