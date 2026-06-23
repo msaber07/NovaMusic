@@ -42,3 +42,5 @@ Thumbs.db
 # Temporary / test scrap files
 cobalt_html.txt
 temp_inspect/
+local_app_debug_logs.txt
+local_app_debug_logs_utf8.txt
