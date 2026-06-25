@@ -168,8 +168,7 @@ fun MainScreen(
                 NavigationBar(
                     containerColor = CyberDarkBlue,
                     tonalElevation = 8.dp,
-                    modifier = Modifier.border(
-                        border = BorderStroke(0.5.dp, NeonPurple.copy(alpha = 0.3f)),
+                    modifier = Modifier.clip(
                         shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
                     )
                 ) {
