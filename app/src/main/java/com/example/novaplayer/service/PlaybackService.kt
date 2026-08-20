@@ -299,9 +299,6 @@ class PlaybackService : MediaLibraryService() {
 
         val httpDataSourceFactory = androidx.media3.datasource.okhttp.OkHttpDataSource.Factory(repository.okHttpClient)
             .setUserAgent("com.google.android.youtube/20.10.38 (Linux; U; Android 10; en_US;)")
-            .setDefaultRequestProperties(mapOf(
-                "Range" to "bytes=0-"
-            ))
 
         val defaultDataSourceFactory = DefaultDataSource.Factory(this, httpDataSourceFactory)
 
@@ -397,47 +394,212 @@ class ResolvingDataSource(
     private val delegate: DataSource
 ) : DataSource {
 
+    companion object {
+        // YouTube currently rejects open-ended and multi-megabyte ranges for many direct
+        // googlevideo URLs. Keep each request comfortably below the observed 1 MiB limit.
+        private const val YOUTUBE_CHUNK_SIZE = 512L * 1024L
+    }
+
+    private var chunkedYoutube = false
+    private var delegateOpen = false
+    private var baseDataSpec: DataSpec? = null
+    private var resolvedUri: Uri? = null
+    private var currentPosition = 0L
+    private var totalLength = C.LENGTH_UNSET.toLong()
+    private var currentChunkRemaining = 0L
+    private var sabrDataSource: com.example.novaplayer.data.repository.YoutubeSabrDataSource? = null
+
     override fun addTransferListener(transferListener: TransferListener) {
         delegate.addTransferListener(transferListener)
     }
 
     override fun open(dataSpec: DataSpec): Long {
+        sabrDataSource?.close()
+        sabrDataSource = null
+        closeDelegate()
+        chunkedYoutube = false
+        baseDataSpec = null
+        resolvedUri = null
+        currentPosition = 0L
+        totalLength = C.LENGTH_UNSET.toLong()
+        currentChunkRemaining = 0L
+
         val uri = dataSpec.uri
         val scheme = uri.scheme
-        val resolvedDataSpec = if (scheme == "youtube") {
-            val songId = uri.host ?: uri.lastPathSegment ?: ""
+        if (scheme != "youtube") {
+            delegateOpen = true
+            return delegate.open(dataSpec)
+        }
+
+        val songId = uri.host ?: uri.lastPathSegment ?: ""
+        var directFallbackUrl: String? = null
+        try {
+            val sabrInfo = kotlinx.coroutines.runBlocking {
+                repository.resolveYoutubeSabrStream(songId)
+            }
+            if (sabrInfo != null) {
+                directFallbackUrl = sabrInfo.directUrl
+                val source = com.example.novaplayer.data.repository.YoutubeSabrDataSource(
+                    repository.okHttpClient,
+                    sabrInfo,
+                    repository::log
+                )
+                try {
+                    val length = source.open(dataSpec)
+                    sabrDataSource = source
+                    repository.log("ResolvingDataSource: YouTube SABR audio stream opened for $songId")
+                    return length
+                } catch (e: Exception) {
+                    source.close()
+                    repository.log("ResolvingDataSource: SABR open failed, using direct fallback: ${e.message}")
+                }
+            }
+        } catch (e: Exception) {
+            repository.log("ResolvingDataSource: SABR resolution failed, using direct fallback: ${e.message}")
+        }
+
+        run {
             repository.log("ResolvingDataSource: Intercepted placeholder URI: $uri, songId: $songId")
-            
+
             // Resolve the stream URL synchronously on ExoPlayer's loading background thread
-            val resolvedUrl = kotlinx.coroutines.runBlocking {
+            val resolvedUrl = directFallbackUrl ?: kotlinx.coroutines.runBlocking {
                 repository.resolveStreamUrl(songId)
             }
-            repository.log("ResolvingDataSource: Resolved stream URL: $resolvedUrl")
-            
-            if (resolvedUrl.isNotEmpty()) {
-                dataSpec.buildUpon()
-                    .setUri(Uri.parse(resolvedUrl))
-                    .build()
-            } else {
+            repository.log("ResolvingDataSource: Resolved stream URL: ${repository.redactUrlForLog(resolvedUrl)}")
+
+            if (resolvedUrl.isEmpty()) {
                 repository.log("ResolvingDataSource: Failed to resolve stream URL for $songId")
-                dataSpec
+                throw java.io.IOException("Unable to resolve YouTube stream for $songId")
             }
-        } else {
-            dataSpec
+
+            val uri = Uri.parse(resolvedUrl)
+            chunkedYoutube = true
+            baseDataSpec = dataSpec
+            resolvedUri = uri
+            currentPosition = dataSpec.position
+            totalLength = uri.getQueryParameter("clen")?.toLongOrNull()
+                ?.takeIf { it > 0L }
+                ?: C.LENGTH_UNSET.toLong()
+            dataSpec.buildUpon().setUri(uri).build()
         }
-        return delegate.open(resolvedDataSpec)
+
+        // Open the first finite range now so ExoPlayer receives a real stream length and
+        // failures are reported from open(), as expected by Media3.
+        if (!openNextChunk()) {
+            throw java.io.IOException("Unable to open YouTube stream")
+        }
+
+        val remaining = if (totalLength != C.LENGTH_UNSET.toLong()) {
+            (totalLength - dataSpec.position).coerceAtLeast(0L)
+        } else {
+            C.LENGTH_UNSET.toLong()
+        }
+        repository.log(
+            "ResolvingDataSource: Using finite YouTube ranges, " +
+                "position=${dataSpec.position}, length=$remaining"
+        )
+        return remaining
     }
 
     override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
-        return delegate.read(buffer, offset, length)
+        sabrDataSource?.let { return it.read(buffer, offset, length) }
+        if (!chunkedYoutube) {
+            return delegate.read(buffer, offset, length)
+        }
+
+        while (true) {
+            if (currentChunkRemaining <= 0L) {
+                if (!openNextChunk()) {
+                    return C.RESULT_END_OF_INPUT
+                }
+            }
+
+            val readLength = minOf(length.toLong(), currentChunkRemaining).toInt()
+            val bytesRead = delegate.read(buffer, offset, readLength)
+            if (bytesRead == C.RESULT_END_OF_INPUT) {
+                closeDelegate()
+                currentChunkRemaining = 0L
+                return C.RESULT_END_OF_INPUT
+            }
+            if (bytesRead > 0) {
+                currentPosition += bytesRead
+                currentChunkRemaining -= bytesRead
+            }
+            return bytesRead
+        }
     }
 
     override fun getUri(): Uri? {
-        return delegate.getUri()
+        return sabrDataSource?.getUri() ?: delegate.getUri()
     }
 
     override fun close() {
-        delegate.close()
+        sabrDataSource?.close()
+        sabrDataSource = null
+        closeDelegate()
+        chunkedYoutube = false
+        baseDataSpec = null
+        resolvedUri = null
+        currentChunkRemaining = 0L
+    }
+
+    private fun openNextChunk(): Boolean {
+        if (!chunkedYoutube) return false
+        if (totalLength != C.LENGTH_UNSET.toLong() && currentPosition >= totalLength) return false
+
+        closeDelegate()
+        val template = baseDataSpec ?: return false
+        val uri = resolvedUri ?: return false
+        val remaining = if (totalLength != C.LENGTH_UNSET.toLong()) {
+            totalLength - currentPosition
+        } else {
+            YOUTUBE_CHUNK_SIZE
+        }
+        val chunkLength = minOf(YOUTUBE_CHUNK_SIZE, remaining)
+        if (chunkLength <= 0L) return false
+
+        val chunkSpec = template.buildUpon()
+            .setUri(uri)
+            .setPosition(currentPosition)
+            .setLength(chunkLength)
+            .build()
+        val openedLength = delegate.open(chunkSpec)
+        delegateOpen = true
+        currentChunkRemaining = if (openedLength != C.LENGTH_UNSET.toLong()) {
+            openedLength
+        } else {
+            chunkLength
+        }
+        // Some progressive URLs omit `clen` from their query. A short final
+        // ranged response is still enough to learn the total length and avoids
+        // issuing one extra range request that would otherwise return HTTP 416.
+        if (totalLength == C.LENGTH_UNSET.toLong() &&
+            openedLength != C.LENGTH_UNSET.toLong() &&
+            openedLength < chunkLength
+        ) {
+            totalLength = currentPosition + openedLength
+        }
+        if (currentChunkRemaining <= 0L) {
+            closeDelegate()
+            return false
+        }
+        repository.log(
+            "ResolvingDataSource: Opened range " +
+                "$currentPosition-${currentPosition + chunkLength - 1} " +
+                "(reported=$currentChunkRemaining)"
+        )
+        return currentChunkRemaining > 0L
+    }
+
+    private fun closeDelegate() {
+        // Media3 may retry an open after a failed load without giving the wrapper a
+        // successful open callback. Always close the delegate so DefaultDataSource and
+        // CacheDataSource cannot retain an earlier open state across retries/chunks.
+        try {
+            delegate.close()
+        } finally {
+            delegateOpen = false
+        }
     }
 }
 

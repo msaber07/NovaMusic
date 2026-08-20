@@ -1,6 +1,7 @@
 package com.example.novaplayer.data.repository
 
 import android.content.Context
+import android.net.Uri
 import com.example.novaplayer.data.local.MusicDatabase
 import com.example.novaplayer.data.local.PlaylistEntity
 import com.example.novaplayer.data.local.PlaylistSongCrossRef
@@ -35,6 +36,8 @@ class MusicRepository(private val context: Context) {
     companion object {
         @Volatile
         private var isNewPipeInitialized = false
+
+        private const val STREAM_CHUNK_SIZE = 512L * 1024L
         
         val resolutionStatus = kotlinx.coroutines.flow.MutableStateFlow("")
     }
@@ -60,7 +63,7 @@ class MusicRepository(private val context: Context) {
     private var activeInvidiousBaseUrl = "https://inv.thepixora.com"
 
     private fun checkUrlWorks(url: String): Boolean {
-        log("Testing URL: $url")
+        log("Testing URL: ${redactUrlForLog(url)}")
         return try {
             val requestBuilder = Request.Builder().url(url)
             
@@ -86,11 +89,11 @@ class MusicRepository(private val context: Context) {
                 val isSuccessful = response.isSuccessful
                 val contentType = response.header("Content-Type") ?: ""
                 val works = isSuccessful && !contentType.contains("text/html") && !contentType.contains("text/plain") && !contentType.contains("application/json")
-                log("  URL $url -> code: ${response.code}, Content-Type: $contentType, works: $works")
+                log("  URL ${redactUrlForLog(url)} -> code: ${response.code}, Content-Type: $contentType, works: $works")
                 works
             }
         } catch (e: Exception) {
-            log("  URL $url -> failed with exception: ${e.message}")
+            log("  URL ${redactUrlForLog(url)} -> failed with exception: ${e.message}")
             false
         }
     }
@@ -110,7 +113,6 @@ class MusicRepository(private val context: Context) {
     }
 
     val okHttpClient = OkHttpClient.Builder()
-        .protocols(listOf(okhttp3.Protocol.HTTP_1_1))
         .addInterceptor { chain ->
             val original = chain.request()
             val hasUserAgent = original.header("User-Agent") != null
@@ -124,9 +126,33 @@ class MusicRepository(private val context: Context) {
             chain.proceed(request)
         }
         .addInterceptor(HttpLoggingInterceptor().apply {
-            level = HttpLoggingInterceptor.Level.BODY
+            // Request bodies contain visitor data/PoTokens and response URLs can
+            // contain signed googlevideo query parameters. Keep those out of the
+            // on-device diagnostic log.
+            level = HttpLoggingInterceptor.Level.NONE
         })
         .build()
+
+    /** Logs only non-sensitive URL metadata; never expose signed query values. */
+    fun redactUrlForLog(rawUrl: String): String {
+        return runCatching {
+            val parsed = Uri.parse(rawUrl)
+            val metadata = listOf("itag", "clen", "dur")
+                .mapNotNull { key -> parsed.getQueryParameter(key)?.let { "$key=$it" } }
+                .joinToString(",")
+            buildString {
+                append(parsed.scheme ?: "https")
+                append("://")
+                append(parsed.host ?: "redacted")
+                if (!parsed.encodedPath.isNullOrEmpty()) append("/[path]")
+                if (metadata.isNotEmpty()) append("?$metadata")
+            }
+        }.getOrDefault("[redacted-url]")
+    }
+
+    private val youtubePoTokenProvider by lazy {
+        YoutubePoTokenProvider(context, okHttpClient, ::log)
+    }
 
     // Local search helper using NewPipe Extractor
     private suspend fun searchNewPipe(query: String): List<SongEntity> = withContext(Dispatchers.IO) {
@@ -387,54 +413,47 @@ class MusicRepository(private val context: Context) {
         return Pair(null, null)
     }
 
-    private suspend fun resolveStreamUrlViaInnerTube(videoId: String): String? = withContext(Dispatchers.IO) {
-        log("resolveStreamUrlViaInnerTube: Resolving $videoId via InnerTube ANDROID_VR API...")
+    private suspend fun resolveStreamUrlViaInnerTube(videoId: String): YoutubeSabrStreamInfo? = withContext(Dispatchers.IO) {
+        log("resolveStreamUrlViaInnerTube: Resolving $videoId via InnerTube ANDROID API with SABR support...")
         try {
-            val (visitorData, cookies) = fetchVisitorDataAndCookies(videoId)
+            // Keep the initial player request anonymous. The visitor data returned by
+            // this response is used to mint the short-lived streaming poToken below.
+            val cookies: String? = null
             
             val url = "https://www.youtube.com/youtubei/v1/player"
             val mediaType = "application/json; charset=utf-8".toMediaTypeOrNull()
             
             // Construct context JSON
-            val visitorDataField = if (visitorData != null) ",\"visitorData\": \"$visitorData\"" else ""
-            
             val jsonPayload = """
                 {
                     "videoId": "$videoId",
                     "context": {
                         "client": {
-                            "clientName": "ANDROID_VR",
-                            "clientVersion": "1.65.10",
-                            "deviceMake": "Oculus",
-                            "deviceModel": "Quest 3",
-                            "androidSdkVersion": 32,
+                            "clientName": "ANDROID",
+                            "clientVersion": "20.10.38",
+                            "androidSdkVersion": 34,
                             "osName": "Android",
-                            "osVersion": "12L",
+                            "osVersion": "14",
                             "hl": "en",
                             "gl": "US",
                             "utcOffsetMinutes": 0
-                            $visitorDataField
                         }
                     }
                 }
             """.trimIndent()
             
             val requestBody = jsonPayload.toRequestBody(mediaType)
-            val playerUa = "com.google.android.apps.youtube.vr.oculus/1.65.10 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip"
+            val playerUa = "com.google.android.youtube/20.10.38 (Linux; U; Android 14; en_US) gzip"
             
             val requestBuilder = Request.Builder()
                 .url(url)
                 .post(requestBody)
                 .header("Content-Type", "application/json")
                 .header("User-Agent", playerUa)
-                .header("X-YouTube-Client-Name", "28")
-                .header("X-YouTube-Client-Version", "1.65.10")
-                .header("Origin", "https://www.youtube.com")
+                .header("X-YouTube-Client-Name", "3")
+                .header("X-YouTube-Client-Version", "20.10.38")
                 .header("Accept", "application/json")
                 
-            if (visitorData != null) {
-                requestBuilder.header("X-Goog-Visitor-Id", visitorData)
-            }
             if (cookies != null) {
                 requestBuilder.header("Cookie", cookies)
             }
@@ -452,24 +471,103 @@ class MusicRepository(private val context: Context) {
                     val bodyStr = response.body?.string() ?: ""
                     if (bodyStr.isNotEmpty()) {
                         val json = com.google.gson.JsonParser().parse(bodyStr).asJsonObject
+                        val responseVisitorData = json.getAsJsonObject("responseContext")
+                            ?.get("visitorData")?.asString
                         
-                        val playabilityStatus = json.getAsJsonObject("playabilityStatus")
+                        val poTokens = responseVisitorData?.let { visitor ->
+                            runCatching {
+                                youtubePoTokenProvider.getTokens(videoId, visitor)
+                            }.onFailure { error ->
+                                log("  YouTube poToken generation failed: ${error.message}")
+                            }.getOrNull()
+                        }
+
+                        // Web BotGuard tokens must be bound to the player
+                        // response that supplies the media URLs. Reissue the
+                        // request with both visitorData and the player token;
+                        // otherwise the token may be valid but ignored by the
+                        // playback/SABR backend.
+                        val playerJson = if (poTokens != null) {
+                            val tokenPayload = """
+                                {
+                                    "videoId": "$videoId",
+                                    "contentCheckOk": true,
+                                    "racyCheckOk": true,
+                                    "context": {
+                                        "client": {
+                                            "clientName": "ANDROID",
+                                            "clientVersion": "20.10.38",
+                                            "androidSdkVersion": 34,
+                                            "osName": "Android",
+                                            "osVersion": "14",
+                                            "hl": "en",
+                                            "gl": "US",
+                                            "utcOffsetMinutes": 0,
+                                            "visitorData": "${poTokens.visitorData}"
+                                        }
+                                    },
+                                    "serviceIntegrityDimensions": {
+                                        "poToken": "${poTokens.playerPoToken}"
+                                    }
+                                }
+                            """.trimIndent()
+                            val tokenRequest = Request.Builder()
+                                .url(url)
+                                .post(tokenPayload.toRequestBody(mediaType))
+                                .header("Content-Type", "application/json")
+                                .header("User-Agent", playerUa)
+                                .header("X-YouTube-Client-Name", "3")
+                                .header("X-YouTube-Client-Version", "20.10.38")
+                                .header("Accept", "application/json")
+                                .header("X-Goog-Visitor-Id", poTokens.visitorData)
+                                .build()
+                            runCatching {
+                                tempClient.newCall(tokenRequest).execute().use { tokenResponse ->
+                                    if (tokenResponse.isSuccessful) {
+                                        tokenResponse.body?.string()?.takeIf { it.isNotBlank() }?.let {
+                                            com.google.gson.JsonParser().parse(it).asJsonObject
+                                        }
+                                    } else {
+                                        log("  Token-bound InnerTube request failed: ${tokenResponse.code}")
+                                        null
+                                    }
+                                }
+                            }.getOrNull() ?: json
+                        } else {
+                            json
+                        }
+
+                        val effectiveVisitorData = poTokens?.visitorData
+                            ?: playerJson.getAsJsonObject("responseContext")
+                                ?.get("visitorData")?.asString
+                            ?: responseVisitorData
+
+                        val playabilityStatus = playerJson.getAsJsonObject("playabilityStatus")
                         val status = playabilityStatus?.get("status")?.asString
                         if (status != null && status != "OK") {
                             val reason = playabilityStatus.get("reason")?.asString ?: "Unknown restriction"
                             log("  InnerTube playback check: Video playability status is $status ($reason)")
                         }
                         
-                        val streamingData = json.getAsJsonObject("streamingData")
+                        val streamingData = playerJson.getAsJsonObject("streamingData")
                         if (streamingData != null) {
                             val adaptiveFormats = streamingData.getAsJsonArray("adaptiveFormats")
                             if (adaptiveFormats != null && adaptiveFormats.size() > 0) {
                                 var selectedUrl: String? = null
+                                var selectedItag = -1
+                                var selectedVideoItag = -1
+                                var selectedLastModified = 0L
+                                var selectedVideoLastModified = 0L
+                                var selectedContentLength = -1L
                                 var bestScore = -1
                                 
                                 for (element in adaptiveFormats) {
                                     val fmt = element.asJsonObject
                                     val mimeType = fmt.get("mimeType")?.asString ?: ""
+                                    if (mimeType.startsWith("video/") && selectedVideoItag <= 0) {
+                                        selectedVideoItag = fmt.get("itag")?.asInt ?: -1
+                                        selectedVideoLastModified = fmt.get("lastModified")?.asLong ?: 0L
+                                    }
                                     if (mimeType.contains("audio")) {
                                         val streamUrl = fmt.get("url")?.asString
                                         if (!streamUrl.isNullOrEmpty()) {
@@ -488,14 +586,86 @@ class MusicRepository(private val context: Context) {
                                             if (score > bestScore || selectedUrl == null) {
                                                 bestScore = score
                                                 selectedUrl = streamUrl
+                                                selectedItag = itag
+                                                selectedLastModified = fmt.get("lastModified")?.asLong ?: 0L
+                                                selectedContentLength = fmt.get("contentLength")?.asLong ?: -1L
                                             }
                                         }
                                     }
                                 }
+
+                                // YouTube still exposes a progressive muxed MP4 for
+                                // some videos. It is a reliable compatibility path
+                                // for audio playback because it is not subject to the
+                                // short byte-range window applied to SABR adaptive
+                                // URLs. Prefer it only for the direct fallback; SABR
+                                // continues to use the selected adaptive audio format.
+                                val playerProgressiveUrl = streamingData.getAsJsonArray("formats")
+                                    ?.map { it.asJsonObject }
+                                    ?.firstOrNull { !it.get("url")?.asString.isNullOrBlank() }
+                                    ?.get("url")?.asString
+                                val originalProgressiveUrl = json.getAsJsonObject("streamingData")
+                                    ?.getAsJsonArray("formats")
+                                    ?.map { it.asJsonObject }
+                                    ?.firstOrNull { !it.get("url")?.asString.isNullOrBlank() }
+                                    ?.get("url")?.asString
+                                val progressiveUrl = playerProgressiveUrl ?: originalProgressiveUrl
                                 
-                                if (selectedUrl != null) {
-                                    log("  InnerTube successfully resolved url (length: ${selectedUrl.length})")
-                                    return@withContext selectedUrl
+                                val serverAbrUrl = streamingData.get("serverAbrStreamingUrl")?.asString
+                                // When a PoToken-bound player response is used, its
+                                // Ustreamer config is bound to the same playback
+                                // context. Pairing it with the anonymous response's
+                                // config makes SABR reject the request as malformed.
+                                val ustreamerConfig = playerJson.getAsJsonObject("playerConfig")
+                                    ?.getAsJsonObject("mediaCommonConfig")
+                                    ?.getAsJsonObject("mediaUstreamerRequestConfig")
+                                    ?.get("videoPlaybackUstreamerConfig")
+                                    ?.asString
+                                if (!selectedUrl.isNullOrBlank() && !serverAbrUrl.isNullOrBlank() && !ustreamerConfig.isNullOrBlank()) {
+                                    val directUrl = progressiveUrl ?: selectedUrl
+                                    val resolvedDirectUrl = if (progressiveUrl != null) {
+                                        // The anonymous Android response's muxed MP4
+                                        // remains usable for the direct compatibility
+                                        // path and does not need a streaming PoToken.
+                                        directUrl
+                                    } else poTokens?.streamingPoToken?.let { token ->
+                                        Uri.parse(directUrl).buildUpon()
+                                            .appendQueryParameter("pot", token)
+                                            .build()
+                                            .toString()
+                                    } ?: directUrl
+                                    val durationMs = playerJson.getAsJsonObject("videoDetails")
+                                        ?.get("lengthSeconds")?.asLong?.times(1000L) ?: -1L
+                                    log(
+                                        "  InnerTube SABR session ready: itag=$selectedItag, " +
+                                            "videoItag=$selectedVideoItag, " +
+                                            "contentLength=$selectedContentLength, durationMs=$durationMs, " +
+                                            "poToken=${poTokens != null}, " +
+                                            "directTransport=" + when {
+                                                playerProgressiveUrl != null -> "progressive-token-bound"
+                                                originalProgressiveUrl != null -> "progressive-anonymous"
+                                                else -> "adaptive"
+                                            }
+                                    )
+                                    return@withContext YoutubeSabrStreamInfo(
+                                        videoId = videoId,
+                                        directUrl = resolvedDirectUrl,
+                                        serverAbrStreamingUrl = serverAbrUrl,
+                                        videoPlaybackUstreamerConfig = ustreamerConfig,
+                                        formatId = selectedItag,
+                                        // SABR needs a video format selected as a discarded track
+                                        // even for audio-only playback. The DataSource marks this
+                                        // format as fully buffered, matching the reference client.
+                                        videoFormatId = selectedVideoItag,
+                                        formatLastModified = selectedLastModified,
+                                        videoFormatLastModified = selectedVideoLastModified,
+                                        contentLength = selectedContentLength,
+                                        durationMs = durationMs,
+                                        streamingPoToken = poTokens?.streamingPoToken,
+                                        userAgent = playerUa,
+                                        visitorData = effectiveVisitorData,
+                                        cookies = cookies
+                                    )
                                 }
                             }
                         }
@@ -511,6 +681,11 @@ class MusicRepository(private val context: Context) {
         null
     }
 
+    suspend fun resolveYoutubeSabrStream(songId: String): YoutubeSabrStreamInfo? = withContext(Dispatchers.IO) {
+        if (!songId.startsWith("yt_")) return@withContext null
+        resolveStreamUrlViaInnerTube(songId.removePrefix("yt_"))
+    }
+
     suspend fun resolveStreamUrl(songId: String): String = withContext(Dispatchers.IO) {
         log("Resolving stream URL for songId: $songId")
         resolutionStatus.value = context.getString(R.string.status_resolving)
@@ -523,12 +698,12 @@ class MusicRepository(private val context: Context) {
             
             // 0. Try custom InnerTube resolver first (keep fallback system intact as requested)
             try {
-                val innerTubeUrl = resolveStreamUrlViaInnerTube(videoId)
-                if (!innerTubeUrl.isNullOrBlank()) {
-                    log("  InnerTube resolved URL: $innerTubeUrl, validating stream connectivity...")
-                    if (checkUrlWorks(innerTubeUrl)) {
-                        log("  Successfully resolved and verified via custom InnerTube: $innerTubeUrl")
-                        return@withContext innerTubeUrl
+                val innerTubeInfo = resolveStreamUrlViaInnerTube(videoId)
+                if (innerTubeInfo != null) {
+                    log("  InnerTube resolved SABR URL, validating direct stream connectivity...")
+                    if (checkUrlWorks(innerTubeInfo.directUrl)) {
+                        log("  Successfully resolved and verified via custom InnerTube SABR session")
+                        return@withContext innerTubeInfo.directUrl
                     } else {
                         log("  Custom InnerTube URL failed validation check (returned 403 or failed). Skipping...")
                     }
@@ -564,7 +739,7 @@ class MusicRepository(private val context: Context) {
                 log("    NewPipe found ${audioStreams?.size ?: 0} audio streams")
                 if (!audioStreams.isNullOrEmpty()) {
                     for (audio in audioStreams) {
-                        log("      Stream: format=${audio.format}, bitrate=${audio.bitrate}, url=${audio.getUrl()?.take(30)}...")
+                        log("      Stream: format=${audio.format}, bitrate=${audio.bitrate}")
                     }
                     val bestAudio = audioStreams.find { it.format?.suffix?.lowercase() == "m4a" }
                         ?: audioStreams.find { it.format?.name?.lowercase() == "m4a" }
@@ -582,9 +757,9 @@ class MusicRepository(private val context: Context) {
             }
             
             if (!extractedUrl.isNullOrBlank()) {
-                log("  NewPipe extracted URL: $extractedUrl, validating stream connectivity...")
+                log("  NewPipe extracted stream, validating connectivity...")
                 if (checkUrlWorks(extractedUrl!!)) {
-                    log("  Successfully resolved and verified via NewPipe: $extractedUrl")
+                    log("  Successfully resolved and verified via NewPipe: ${redactUrlForLog(extractedUrl)}")
                     return@withContext extractedUrl!!
                 } else {
                     log("  NewPipe URL failed validation check. Skipping...")
@@ -597,7 +772,7 @@ class MusicRepository(private val context: Context) {
             val activeUrl = activeInvidiousBaseUrl
             val activeStreamUrl = "$activeUrl/latest_version?id=$videoId&itag=140&local=true"
             if (checkUrlWorks(activeStreamUrl)) {
-                log("  Successfully resolved with active cached URL: $activeStreamUrl")
+                log("  Successfully resolved with active cached URL: ${redactUrlForLog(activeStreamUrl)}")
                 return@withContext activeStreamUrl
             }
             
@@ -620,7 +795,7 @@ class MusicRepository(private val context: Context) {
             if (workingBase != null) {
                 activeInvidiousBaseUrl = workingBase
                 val resolvedUrl = "$workingBase/latest_version?id=$videoId&itag=140&local=true"
-                log("  Successfully resolved with parallel Invidious check: $resolvedUrl")
+                log("  Successfully resolved with parallel Invidious check: ${redactUrlForLog(resolvedUrl)}")
                 return@withContext resolvedUrl
             }
             
@@ -673,13 +848,13 @@ class MusicRepository(private val context: Context) {
             }
             
             if (cobaltStreamUrl != null) {
-                log("  Successfully resolved with Cobalt: $cobaltStreamUrl")
+                log("  Successfully resolved with Cobalt: ${redactUrlForLog(cobaltStreamUrl)}")
                 return@withContext cobaltStreamUrl
             }
             
             // Final fallback: return the original default URL
             val fallbackUrl = "https://inv.thepixora.com/latest_version?id=$videoId&itag=140&local=true"
-            log("  All methods failed! Returning final fallback URL: $fallbackUrl")
+            log("  All methods failed! Returning final fallback stream")
             return@withContext fallbackUrl
         } finally {
             resolutionStatus.value = ""
@@ -1088,6 +1263,21 @@ class MusicRepository(private val context: Context) {
         dao.deletePlaylistSongCrossRef(PlaylistSongCrossRef(playlistId, songId))
     }
 
+    private fun streamContentLength(url: String): Long {
+        return try {
+            android.net.Uri.parse(url).getQueryParameter("clen")?.toLongOrNull()
+                ?.takeIf { it > 0L }
+                ?: -1L
+        } catch (_: Exception) {
+            -1L
+        }
+    }
+
+    private fun contentRangeLength(header: String?): Long {
+        val total = header?.substringAfterLast('/', "")?.toLongOrNull() ?: return -1L
+        return total.takeIf { it > 0L } ?: -1L
+    }
+
     // Download song logic
     suspend fun downloadSong(song: SongEntity, onProgress: (Float) -> Unit = {}): Boolean = withContext(Dispatchers.IO) {
         try {
@@ -1099,6 +1289,26 @@ class MusicRepository(private val context: Context) {
                 }
             }
 
+            val destFile = File(context.filesDir, "audio_${song.id}.mp3")
+            if (song.id.startsWith("yt_")) {
+                val sabrInfo = resolveYoutubeSabrStream(song.id)
+                if (sabrInfo != null) {
+                    if (destFile.exists()) destFile.delete()
+                    log("Downloading YouTube audio through SABR: ${song.id}")
+                    val downloaded = downloadSabrStream(sabrInfo, destFile, onProgress)
+                    if (downloaded) {
+                        val updated = (dao.getSongById(song.id) ?: song).copy(
+                            isDownloaded = true,
+                            localUri = destFile.absolutePath
+                        )
+                        dao.insertSong(updated)
+                        return@withContext true
+                    }
+                    log("SABR download failed; trying direct compatibility stream")
+                    destFile.delete()
+                }
+            }
+
             val downloadUrl = if (song.id.startsWith("yt_")) {
                 resolveStreamUrl(song.id)
             } else {
@@ -1106,35 +1316,68 @@ class MusicRepository(private val context: Context) {
             }
             if (downloadUrl.isBlank()) return@withContext false
 
-            val request = Request.Builder()
-                .url(downloadUrl)
-                .header("User-Agent", "com.google.android.youtube/20.10.38 (Linux; U; Android 10; en_US;)")
-                .header("Range", "bytes=0-")
-                .build()
-            val response = okHttpClient.newCall(request).execute()
-            if (!response.isSuccessful) return@withContext false
+            var totalLength = streamContentLength(downloadUrl)
 
-            val body = response.body ?: return@withContext false
-            val contentLength = body.contentLength()
-            
-            val destFile = File(context.filesDir, "audio_${song.id}.mp3")
             if (destFile.exists()) {
                 destFile.delete()
             }
 
-            body.byteStream().use { inputStream ->
-                FileOutputStream(destFile).use { outputStream ->
-                    val buffer = ByteArray(8 * 1024)
-                    var bytesRead: Int
-                    var totalBytesRead = 0L
-                    while (inputStream.read(buffer).also { bytesRead = it } != -1) {
-                        outputStream.write(buffer, 0, bytesRead)
-                        totalBytesRead += bytesRead
-                        if (contentLength > 0) {
-                            onProgress(totalBytesRead.toFloat() / contentLength)
+            FileOutputStream(destFile).use { outputStream ->
+                var position = 0L
+                var finished = false
+
+                while (!finished) {
+                    val requestedEnd = if (totalLength > 0L) {
+                        minOf(totalLength - 1L, position + STREAM_CHUNK_SIZE - 1L)
+                    } else {
+                        position + STREAM_CHUNK_SIZE - 1L
+                    }
+                    val request = Request.Builder()
+                        .url(downloadUrl)
+                        .header("User-Agent", "com.google.android.youtube/20.10.38 (Linux; U; Android 10; en_US;)")
+                        .header("Range", "bytes=$position-$requestedEnd")
+                        .build()
+
+                    okHttpClient.newCall(request).execute().use { response ->
+                        if (!response.isSuccessful) return@withContext false
+                        val body = response.body ?: return@withContext false
+                        val responseTotal = contentRangeLength(response.header("Content-Range"))
+                        if (totalLength <= 0L && responseTotal > 0L) {
+                            totalLength = responseTotal
                         }
+
+                        var chunkBytesRead = 0L
+                        body.byteStream().use { inputStream ->
+                            val buffer = ByteArray(8 * 1024)
+                            while (true) {
+                                val bytesRead = inputStream.read(buffer)
+                                if (bytesRead == -1) break
+                                if (bytesRead == 0) continue
+                                outputStream.write(buffer, 0, bytesRead)
+                                chunkBytesRead += bytesRead
+                            }
+                        }
+
+                        if (chunkBytesRead <= 0L) return@withContext false
+                        position += chunkBytesRead
+                        if (totalLength > 0L) {
+                            onProgress((position.toFloat() / totalLength).coerceIn(0f, 1f))
+                        }
+
+                        // A normal 200 response is already the complete resource. For a
+                        // ranged response, stop at the advertised length or a short chunk.
+                        finished = response.code == 200 ||
+                            (totalLength > 0L && position >= totalLength) ||
+                            (response.code == 206 && chunkBytesRead < STREAM_CHUNK_SIZE)
                     }
                 }
+                if (totalLength <= 0L) {
+                    onProgress(1f)
+                }
+            }
+
+            if (!destFile.exists() || destFile.length() <= 0L) {
+                return@withContext false
             }
 
             val updated = (dao.getSongById(song.id) ?: song).copy(
@@ -1146,6 +1389,42 @@ class MusicRepository(private val context: Context) {
         } catch (e: Exception) {
             e.printStackTrace()
             return@withContext false
+        }
+    }
+
+    private fun downloadSabrStream(
+        streamInfo: YoutubeSabrStreamInfo,
+        destination: File,
+        onProgress: (Float) -> Unit
+    ): Boolean {
+        val dataSource = YoutubeSabrDataSource(okHttpClient, streamInfo, ::log)
+        return try {
+            val dataSpec = androidx.media3.datasource.DataSpec(
+                Uri.parse("youtube://${streamInfo.videoId}")
+            )
+            val totalLength = dataSource.open(dataSpec)
+            FileOutputStream(destination).use { output ->
+                val buffer = ByteArray(32 * 1024)
+                var position = 0L
+                while (true) {
+                    val read = dataSource.read(buffer, 0, buffer.size)
+                    if (read == androidx.media3.common.C.RESULT_END_OF_INPUT) break
+                    if (read <= 0) continue
+                    output.write(buffer, 0, read)
+                    position += read
+                    if (totalLength > 0L) {
+                        onProgress((position.toFloat() / totalLength).coerceIn(0f, 1f))
+                    }
+                }
+                output.flush()
+            }
+            onProgress(1f)
+            destination.exists() && destination.length() > 0L
+        } catch (e: Exception) {
+            log("SABR download failed: ${e.message}")
+            false
+        } finally {
+            dataSource.close()
         }
     }
 

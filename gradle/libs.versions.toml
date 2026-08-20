@@ -20,7 +20,7 @@ okhttp = "4.12.0"
 coil = "2.6.0"
 ksp = "2.3.9"
 youtubeExtractor = "1.0.2"
-newpipeExtractorKmp = "1.2.1"
+newpipeExtractorKmp = "1.3.0"
 
 [libraries]
 newpipe-extractor-kmp = { module = "io.github.yushosei:newpipe-extractor-kmp", version.ref = "newpipeExtractorKmp" }
