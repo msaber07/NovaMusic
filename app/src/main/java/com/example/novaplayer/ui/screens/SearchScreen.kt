@@ -73,7 +73,7 @@ fun SearchScreen(viewModel: MusicViewModel) {
                         query = ""
                         viewModel.search("")
                     }) {
-                        Icon(Icons.Default.Clear, contentDescription = "Clear", tint = NeonPink)
+                        Icon(Icons.Default.Clear, contentDescription = stringResource(R.string.clear_desc), tint = NeonPink)
                     }
                 }
             },
@@ -246,7 +246,7 @@ fun SearchSongItem(
         IconButton(onClick = onFavoriteClick) {
             Icon(
                 imageVector = if (song.isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                contentDescription = "Favorite",
+                contentDescription = stringResource(R.string.favorite_desc),
                 tint = if (song.isFavorite) NeonPink else TextSecondary,
                 modifier = Modifier.size(20.dp)
             )
@@ -263,7 +263,7 @@ fun SearchSongItem(
             } else {
                 Icon(
                     imageVector = if (song.isDownloaded) Icons.Default.DownloadDone else Icons.Default.Download,
-                    contentDescription = "Download",
+                contentDescription = stringResource(R.string.download_desc),
                     tint = if (song.isDownloaded) NeonGreen else TextSecondary,
                     modifier = Modifier.size(20.dp)
                 )

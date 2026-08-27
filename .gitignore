@@ -27,6 +27,7 @@ local.properties
 *.keystore
 *.p12
 *.pepk
+keystore.properties
 
 # Local Database files (SQLite/Room cache)
 *.db
@@ -40,7 +41,9 @@ music_database.db
 Thumbs.db
 
 # Temporary / test scrap files
+/app/src/test/
 cobalt_html.txt
 temp_inspect/
 local_app_debug_logs.txt
 local_app_debug_logs_utf8.txt
+YOUTUBE_PLAYBACK_TROUBLESHOOTING_REPORT.md

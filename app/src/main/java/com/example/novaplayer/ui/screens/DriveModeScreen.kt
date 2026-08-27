@@ -657,7 +657,7 @@ fun DriveModeScreen(
                                     viewModel.search("")
                                     focusManager.clearFocus()
                                 }) {
-                                    Icon(Icons.Default.Clear, contentDescription = "Clear", tint = NeonPink)
+                                    Icon(Icons.Default.Clear, contentDescription = stringResource(R.string.clear_desc), tint = NeonPink)
                                 }
                             }
                         },

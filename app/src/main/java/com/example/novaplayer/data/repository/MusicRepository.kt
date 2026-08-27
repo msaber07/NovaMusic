@@ -10,6 +10,7 @@ import com.example.novaplayer.data.local.SongEntity
 import com.example.novaplayer.data.network.InvidiousService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
@@ -29,6 +30,7 @@ import com.yushosei.newpipe.util.DefaultDownloaderImpl
 import java.io.File
 import java.io.FileOutputStream
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import com.example.novaplayer.R
 
 class MusicRepository(private val context: Context) {
@@ -98,20 +100,6 @@ class MusicRepository(private val context: Context) {
         }
     }
 
-    private var popularHits: com.google.gson.JsonObject? = null
-
-    private fun loadPopularHits() {
-        if (popularHits != null) return
-        try {
-            context.assets.open("popular_hits.json").use { inputStream ->
-                val reader = java.io.InputStreamReader(inputStream)
-                popularHits = com.google.gson.JsonParser().parse(reader).asJsonObject
-            }
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-    }
-
     val okHttpClient = OkHttpClient.Builder()
         .addInterceptor { chain ->
             val original = chain.request()
@@ -153,6 +141,10 @@ class MusicRepository(private val context: Context) {
     private val youtubePoTokenProvider by lazy {
         YoutubePoTokenProvider(context, okHttpClient, ::log)
     }
+
+    private val artistCatalog by lazy { ArtistCatalog(context) }
+    private val affinityStore by lazy { RecommendationAffinityStore(context) }
+    private val catalogSearchCache = ConcurrentHashMap<String, List<SongEntity>>()
 
     // Local search helper using NewPipe Extractor
     private suspend fun searchNewPipe(query: String): List<SongEntity> = withContext(Dispatchers.IO) {
@@ -203,8 +195,9 @@ class MusicRepository(private val context: Context) {
                     )
                 }
             }
-            log("NewPipe search found ${songs.size} results.")
-            return@withContext songs
+            val filteredSongs = RecommendationPolicy.filterSearchResults(songs)
+            log("NewPipe search found ${songs.size} results; ${filteredSongs.size} music candidates remain after filtering.")
+            return@withContext filteredSongs
         } catch (e: Exception) {
             log("NewPipe search failed: ${e.message}")
             e.printStackTrace()
@@ -223,7 +216,7 @@ class MusicRepository(private val context: Context) {
         try {
             val localSongs = searchNewPipe(query)
             if (localSongs.isNotEmpty()) {
-                emit(localSongs)
+                emit(RecommendationPolicy.filterSearchResults(localSongs))
                 return@flow
             }
         } catch (e: Exception) {
@@ -281,8 +274,11 @@ class MusicRepository(private val context: Context) {
                             )
                         )
                     }
-                    emit(songs)
-                    return@flow
+                    val filteredSongs = RecommendationPolicy.filterSearchResults(songs)
+                    if (filteredSongs.isNotEmpty()) {
+                        emit(filteredSongs)
+                        return@flow
+                    }
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
@@ -341,8 +337,11 @@ class MusicRepository(private val context: Context) {
                             )
                         )
                     }
-                    emit(songs)
-                    return@flow
+                    val filteredSongs = RecommendationPolicy.filterSearchResults(songs)
+                    if (filteredSongs.isNotEmpty()) {
+                        emit(filteredSongs)
+                        return@flow
+                    }
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
@@ -897,7 +896,7 @@ class MusicRepository(private val context: Context) {
                             )
                         )
                     }
-                    return songs
+                    return RecommendationPolicy.filterSearchResults(songs)
                 }
             }
         } catch (e: Exception) {
@@ -906,7 +905,53 @@ class MusicRepository(private val context: Context) {
         return emptyList()
     }
 
-    suspend fun getRecommendedVideos(songId: String): List<SongEntity> = withContext(Dispatchers.IO) {
+    private fun genreSearchQueryFor(profile: ListeningProfile): String {
+        val turkishQuery = when (profile.genre) {
+            RecommendationProfileResolver.GENRE_POP -> "popüler türkçe pop"
+            RecommendationProfileResolver.GENRE_ROCK -> "popüler türkçe rock"
+            RecommendationProfileResolver.GENRE_RAP -> "popüler türkçe rap"
+            RecommendationProfileResolver.GENRE_ELECTRONIC -> "popüler türkçe elektronik müzik"
+            RecommendationProfileResolver.GENRE_INDIE -> "popüler türkçe alternatif müzik"
+            RecommendationProfileResolver.GENRE_FOLK -> "popüler türkçe halk müziği"
+            RecommendationProfileResolver.GENRE_RNB -> "popüler türkçe r&b"
+            else -> "popüler türkçe müzik"
+        }
+        val globalQuery = when (profile.genre) {
+            RecommendationProfileResolver.GENRE_POP -> "popular pop songs"
+            RecommendationProfileResolver.GENRE_ROCK -> "popular rock songs"
+            RecommendationProfileResolver.GENRE_RAP -> "popular hip hop songs"
+            RecommendationProfileResolver.GENRE_ELECTRONIC -> "popular electronic dance songs"
+            RecommendationProfileResolver.GENRE_INDIE -> "popular indie songs"
+            RecommendationProfileResolver.GENRE_FOLK -> "popular country folk songs"
+            RecommendationProfileResolver.GENRE_RNB -> "popular r&b songs"
+            else -> "popular music"
+        }
+        return if (profile.language == RecommendationProfileResolver.LANGUAGE_TURKISH) {
+            turkishQuery
+        } else {
+            globalQuery
+        }
+    }
+
+    private suspend fun searchCatalogArtist(profile: ArtistCatalogProfile): List<SongEntity> {
+        val cacheKey = RecommendationProfileResolver.normalize(profile.name)
+        catalogSearchCache[cacheKey]?.let { return it }
+
+        val result = searchNewPipe("${profile.name} official audio")
+        val normalizedArtist = RecommendationProfileResolver.normalize(profile.name)
+        val matchingResults = result.filter { song ->
+            RecommendationProfileResolver.normalize(song.title).contains(normalizedArtist) ||
+                RecommendationProfileResolver.normalize(song.artistName).contains(normalizedArtist)
+        }
+        val usableResults = (matchingResults.ifEmpty { result }).take(2)
+        catalogSearchCache.putIfAbsent(cacheKey, usableResults)
+        return usableResults
+    }
+
+    suspend fun getRecommendedVideos(
+        songId: String,
+        excludedIds: Set<String> = emptySet()
+    ): List<SongEntity> = withContext(Dispatchers.IO) {
         if (!songId.startsWith("yt_")) return@withContext emptyList()
         val videoId = songId.removePrefix("yt_")
         
@@ -1005,25 +1050,27 @@ class MusicRepository(private val context: Context) {
                             val artist = dto.get("author")?.let { if (it.isJsonNull) null else it.getAsString() } ?: "Unknown Author"
                             val lengthSeconds = dto.get("lengthSeconds")?.let { if (it.isJsonNull) 0 else it.getAsInt() } ?: 0
                             
-                            if (isSameSongTitle(title, songTitle, author)) {
-                                continue
-                            }
-                            
                             val recSongId = "yt_$recVideoId"
                             val localSong = dao.getSongById(recSongId)
-                            recommendedList.add(
-                                SongEntity(
-                                    id = recSongId,
-                                    title = title,
-                                    artistName = artist,
-                                    audioUrl = "",
-                                    durationSeconds = lengthSeconds,
-                                    albumImageUrl = "https://img.youtube.com/vi/$recVideoId/hqdefault.jpg",
-                                    isDownloaded = localSong?.isDownloaded ?: false,
-                                    localUri = localSong?.localUri,
-                                    isFavorite = localSong?.isFavorite ?: false
-                                )
+                            val candidateSong = SongEntity(
+                                id = recSongId,
+                                title = title,
+                                artistName = artist,
+                                audioUrl = "",
+                                durationSeconds = lengthSeconds,
+                                albumImageUrl = "https://img.youtube.com/vi/$recVideoId/hqdefault.jpg",
+                                isDownloaded = localSong?.isDownloaded ?: false,
+                                localUri = localSong?.localUri,
+                                isFavorite = localSong?.isFavorite ?: false
                             )
+
+                            if (isSameSongTitle(title, songTitle, author) ||
+                                !RecommendationPolicy.isQueueCandidate(candidateSong)
+                            ) {
+                                continue
+                            }
+
+                            recommendedList.add(candidateSong)
                         }
                     }
                     invidiousSuccess = true
@@ -1050,164 +1097,105 @@ class MusicRepository(private val context: Context) {
             }
         }
         
-        // 4. Detect genre and language
-        val genreMappings = mapOf(
-            "pop" to "pop music",
-            "girlband" to "pop music",
-            "girl group" to "pop music",
-            "boyband" to "pop music",
-            "kpop" to "kpop music",
-            "rock" to "rock music",
-            "metal" to "metal music",
-            "punk" to "rock music",
-            "rap" to "rap music",
-            "hip hop" to "hip hop music",
-            "drill" to "rap music",
-            "trap" to "trap music",
-            "r&b" to "r&b music",
-            "jazz" to "jazz music",
-            "classical" to "classical music",
-            "electronic" to "electronic music",
-            "dance" to "dance music",
-            "house" to "house music",
-            "techno" to "techno music",
-            "edm" to "edm music",
-            "indie" to "indie music",
-            "alternative" to "alternative music",
-            "country" to "country music",
-            "folk" to "folk music",
-            "lofi" to "lofi hip hop",
-            "chill" to "lofi hip hop"
+        // 4. Build a stable genre/language profile, then sample high-popularity
+        // artists from the matching catalog bucket. The actual tracks are still
+        // resolved live, so the catalog does not lock the app to old song URLs.
+        val listeningProfile = artistCatalog.resolveProfile(author, songTitle, tags)
+        val genreQuery = genreSearchQueryFor(listeningProfile)
+        val artistQuery = author
+            ?.takeIf { it != "Unknown Author" && it != "Unknown" }
+            ?.let { "$it official audio" }
+            .orEmpty()
+        val recommendationRandom = kotlin.random.Random(System.nanoTime())
+        val historySongs = runCatching { dao.getAllSongs() }.getOrDefault(emptyList())
+        val excludedArtistNames = buildSet {
+            author?.takeIf { it.isNotBlank() }?.let(::add)
+        }
+        val catalogArtists = artistCatalog.selectArtists(
+            listeningProfile = listeningProfile,
+            excludedArtistNames = excludedArtistNames,
+            count = 3,
+            random = recommendationRandom
         )
-        
-        val isTurkish = tags.any { tag -> tag.any { c -> c == 'ı' || c == 'ş' || c == 'ğ' || c == 'ü' || c == 'ö' || c == 'ç' } }
-        val matchedKey = genreMappings.keys.find { key -> tags.any { tag -> tag.contains(key) } }
-        val mappedGenre = matchedKey?.let { genreMappings[it] }
-        
-        val genreQuery = if (!mappedGenre.isNullOrEmpty()) {
-            if (isTurkish && mappedGenre == "pop music") {
-                "popüler türkçe pop"
-            } else if (isTurkish && (mappedGenre == "rap music" || mappedGenre == "hip hop music" || mappedGenre == "trap music")) {
-                "popüler türkçe rap"
-            } else {
-                "popular $mappedGenre"
+        log(
+            "Recommendation profile: genre=${listeningProfile.genre}, " +
+                "language=${listeningProfile.language}, confidence=${listeningProfile.confidence}, " +
+                "catalogArtists=${catalogArtists.joinToString { it.name }}"
+        )
+
+        val (artistSongs, genreSongs, catalogSelections) = coroutineScope {
+            val artistSongsDeferred = async {
+                if (artistQuery.isBlank()) {
+                    emptyList()
+                } else {
+                    runCatching {
+                        searchNewPipe(artistQuery)
+                            .filter { !isSameSongTitle(it.title, songTitle, author) }
+                    }.onFailure { log("Artist query search failed: ${it.message}") }
+                        .getOrDefault(emptyList())
+                }
             }
-        } else {
-            if (isTurkish) "popüler türkçe müzik" else "popular music"
+            val genreSongsDeferred = async {
+                runCatching {
+                    searchNewPipe(genreQuery)
+                        .filter { !isSameSongTitle(it.title, songTitle, author) }
+                }.onFailure { log("Genre query search failed: ${it.message}") }
+                    .getOrDefault(emptyList())
+            }
+            val catalogRequests = catalogArtists.map { catalogArtist ->
+                async {
+                    catalogArtist to searchCatalogArtist(catalogArtist)
+                        .filter { !isSameSongTitle(it.title, songTitle, author) }
+                }
+            }
+
+            Triple(
+                artistSongsDeferred.await(),
+                genreSongsDeferred.await(),
+                catalogRequests.awaitAll()
+            )
         }
-        
-        val artistQuery = if (!author.isNullOrEmpty() && author != "Unknown Author" && author != "Unknown") {
-            val lowerAuthor = author.lowercase(java.util.Locale.ROOT)
-            val qualifiers = listOf("music", "müzik", "video", "song", "şarkı", "band", "grubu", "group", "girlband", "boyband", "live", "concert", "albüm", "album")
-            val qualifiedTag = tags.find { tag ->
-                tag.contains(lowerAuthor) && qualifiers.any { q -> tag.contains(q) } && !tag.contains("reaction") && !tag.contains("cover")
+
+        fun candidateFor(
+            song: SongEntity,
+            source: RecommendationSource,
+            popularityBoost: Double = 0.0
+        ) = RecommendationCandidate(
+            song = song,
+            source = source,
+            popularityBoost = popularityBoost,
+            affinityBoost = affinityStore.boostFor(song)
+        )
+
+        val candidates = buildList {
+            addAll(recommendedList.map { candidateFor(it, RecommendationSource.RELATED) })
+            addAll(artistSongs.map { candidateFor(it, RecommendationSource.ARTIST) })
+            addAll(genreSongs.map { candidateFor(it, RecommendationSource.GENRE) })
+            catalogSelections.forEach { (catalogArtist, songs) ->
+                val popularityBoost = catalogArtist.popularity / 100.0
+                addAll(songs.map { song ->
+                    candidateFor(song, RecommendationSource.CATALOG, popularityBoost)
+                })
             }
-            qualifiedTag ?: (if (isTurkish) "$author şarkıları" else "$author songs")
-        } else {
-            ""
+            addAll(historySongs.map { song ->
+                candidateFor(song, RecommendationSource.HISTORY)
+            })
         }
-        
-        // Fetch artist songs and genre popular songs using curated popular hits database
-        loadPopularHits()
-        
-        val (artistSongs, genreSongs) = coroutineScope {
-            val dbArtistSongsDeferred = async {
-                val results = mutableListOf<SongEntity>()
-                if (artistQuery.isNotEmpty()) {
-                    try {
-                        val songs = searchNewPipe(artistQuery).filter { !isSameSongTitle(it.title, songTitle, author) }
-                        results.addAll(songs)
-                        log("Artist query search found ${songs.size} items.")
-                    } catch (e: Exception) {
-                        log("Artist query search failed: ${e.message}")
-                    }
-                }
-                results
-            }
-            
-            val dbGenreSongsDeferred = async {
-                val results = mutableListOf<SongEntity>()
-                if (genreQuery.isNotEmpty()) {
-                    try {
-                        val songs = searchNewPipe(genreQuery).filter { !isSameSongTitle(it.title, songTitle, author) }
-                        results.addAll(songs)
-                        log("Genre query search found ${songs.size} items.")
-                    } catch (e: Exception) {
-                        log("Genre query search failed: ${e.message}")
-                    }
-                }
-                results
-            }
-            
-            Pair(dbArtistSongsDeferred.await(), dbGenreSongsDeferred.await())
-        }
-        
-        // Mixing and Deduplication logic matching User's requested ratio:
-        // 50% Genre, 35% Artist, 15% Related
-        val finalSongs = mutableListOf<SongEntity>()
-        val seenIds = mutableSetOf<String>()
-        seenIds.add(songId) // skip seed song
-        
-        // Setup indices
-        var recIdx = 0
-        var artIdx = 0
-        var genIdx = 0
-        
-        // We target 15 songs.
-        val targetGenreCount = if (genreSongs.isNotEmpty()) 8 else 0
-        val targetArtistCount = if (artistSongs.isNotEmpty()) {
-            if (targetGenreCount == 0) 10 else 5 // If genre is empty, take up to 10 from artist (70%)
-        } else 0
-        val targetRelatedCount = 15 - (targetGenreCount + targetArtistCount) // fill the rest (min 2, max 15)
-        
-        var genreAdded = 0
-        var artistAdded = 0
-        var relatedAdded = 0
-        
-        // Interleave loops
-        while (finalSongs.size < 15 && (recIdx < recommendedList.size || artIdx < artistSongs.size || genIdx < genreSongs.size)) {
-            // 1. Add Genre (up to targetGenreCount)
-            if (genIdx < genreSongs.size && genreAdded < targetGenreCount) {
-                val s = genreSongs[genIdx++]
-                if (seenIds.add(s.id)) {
-                    finalSongs.add(s)
-                    genreAdded++
-                }
-            }
-            // 2. Add Artist (up to targetArtistCount)
-            if (artIdx < artistSongs.size && artistAdded < targetArtistCount && finalSongs.size < 15) {
-                val s = artistSongs[artIdx++]
-                if (seenIds.add(s.id)) {
-                    finalSongs.add(s)
-                    artistAdded++
-                }
-            }
-            // 3. Add Related (up to targetRelatedCount)
-            if (recIdx < recommendedList.size && relatedAdded < targetRelatedCount && finalSongs.size < 15) {
-                val s = recommendedList[recIdx++]
-                if (seenIds.add(s.id)) {
-                    finalSongs.add(s)
-                    relatedAdded++
-                }
-            }
-            
-            // Safety breakout: if no new songs can be added from any index progress
-            if (recIdx >= recommendedList.size && artIdx >= artistSongs.size && genIdx >= genreSongs.size) {
-                break
-            }
-        }
-        
-        // If still under 15, fill the rest with whatever is remaining in related
-        if (finalSongs.size < 15) {
-            for (s in recommendedList) {
-                if (seenIds.add(s.id)) {
-                    finalSongs.add(s)
-                    if (finalSongs.size >= 15) break
-                }
-            }
-        }
-        
-        log("Recommendations loaded successfully. Total mixed recommendations: ${finalSongs.size}")
+
+        val finalSongs = RecommendationEngine.select(
+            seedId = songId,
+            seedTitle = songTitle,
+            seedArtist = author,
+            candidates = candidates,
+            excludedIds = excludedIds,
+            limit = 10,
+            random = recommendationRandom
+        )
+
+        log(
+            "Recommendations loaded successfully. Candidate pool=${candidates.size}, " +
+                "selected=${finalSongs.size}, excluded=${excludedIds.size}"
+        )
         return@withContext finalSongs
     }
 
@@ -1233,9 +1221,22 @@ class MusicRepository(private val context: Context) {
         val existing = dao.getSongById(song.id)
         if (existing == null) {
             dao.insertSong(song.copy(isFavorite = true))
+            affinityStore.recordFavorite(song)
         } else {
-            dao.updateSong(existing.copy(isFavorite = !existing.isFavorite))
+            val updated = existing.copy(isFavorite = !existing.isFavorite)
+            dao.updateSong(updated)
+            if (updated.isFavorite) {
+                affinityStore.recordFavorite(updated)
+            }
         }
+    }
+
+    suspend fun recordCompleted(song: SongEntity) = withContext(Dispatchers.IO) {
+        affinityStore.recordCompleted(song)
+    }
+
+    suspend fun recordQuickSkip(song: SongEntity) = withContext(Dispatchers.IO) {
+        affinityStore.recordQuickSkip(song)
     }
 
     suspend fun createPlaylist(name: String, description: String? = null) = withContext(Dispatchers.IO) {

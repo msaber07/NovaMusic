@@ -12,6 +12,7 @@ import androidx.media3.session.SessionToken
 import com.example.novaplayer.data.local.PlaylistEntity
 import com.example.novaplayer.data.local.SongEntity
 import com.example.novaplayer.data.repository.MusicRepository
+import com.example.novaplayer.data.repository.RecommendationPolicy
 import com.example.novaplayer.service.PlaybackService
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.MoreExecutors
@@ -104,6 +105,11 @@ class MusicViewModel(context: Context) : ViewModel() {
     private var searchJob: Job? = null
     private var playJob: Job? = null
     private var autoplayJob: Job? = null
+    private val autoplayExpandedSeeds = mutableSetOf<String>()
+
+    private companion object {
+        const val QUICK_SKIP_WINDOW_MS = 30_000L
+    }
 
     init {
         initializeController(context)
@@ -148,13 +154,23 @@ class MusicViewModel(context: Context) : ViewModel() {
             }
 
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                val previousSong = _currentSong.value
+                if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO &&
+                    previousSong != null && previousSong.id != mediaItem?.mediaId
+                ) {
+                    viewModelScope.launch {
+                        repository.recordCompleted(previousSong)
+                    }
+                }
                 updateCurrentMediaItem(mediaItem)
                 updateCurrentQueue()
                 _trackDuration.value = controller.duration.coerceAtLeast(0L)
 
                 val currentIndex = controller.currentMediaItemIndex
                 val itemCount = controller.mediaItemCount
-                if (currentIndex >= 0 && currentIndex == itemCount - 1 && mediaItem != null) {
+                if (currentIndex >= 0 && currentIndex == itemCount - 1 && mediaItem != null &&
+                    autoplayExpandedSeeds.add(mediaItem.mediaId)
+                ) {
                     appendAutoplayRecommendations(mediaItem.mediaId)
                 }
             }
@@ -270,7 +286,13 @@ class MusicViewModel(context: Context) : ViewModel() {
         autoplayJob?.cancel()
         autoplayJob = viewModelScope.launch {
             try {
-                val recommended = repository.getRecommendedVideos(songId)
+                val excludedIds = buildSet {
+                    for (index in 0 until controller.mediaItemCount) {
+                        runCatching { controller.getMediaItemAt(index).mediaId }
+                            .onSuccess { add(it) }
+                    }
+                }
+                val recommended = repository.getRecommendedVideos(songId, excludedIds)
                 if (recommended.isNotEmpty()) {
                     val mediaItems = recommended.map { item ->
                         val playUri = if (item.isDownloaded && item.localUri != null) {
@@ -322,7 +344,10 @@ class MusicViewModel(context: Context) : ViewModel() {
         playJob = viewModelScope.launch {
             _isLoading.value = true
 
-            val mediaItems = queue.map { item ->
+            val safeQueue = RecommendationPolicy.sanitizeQueue(song, queue)
+            autoplayExpandedSeeds.clear()
+
+            val mediaItems = safeQueue.map { item ->
                 val playUri = if (item.isDownloaded && item.localUri != null) {
                     if (item.localUri.startsWith("/")) "file://${item.localUri}" else item.localUri
                 } else item.audioUrl
@@ -342,7 +367,7 @@ class MusicViewModel(context: Context) : ViewModel() {
             }
 
             controller.setMediaItems(mediaItems)
-            val index = queue.indexOfFirst { it.id == song.id }.coerceAtLeast(0)
+            val index = safeQueue.indexOfFirst { it.id == song.id }.coerceAtLeast(0)
             controller.seekTo(index, 0L)
             controller.prepare()
             controller.play()
@@ -368,6 +393,12 @@ class MusicViewModel(context: Context) : ViewModel() {
     }
 
     fun skipToNext() {
+        val current = _currentSong.value
+        if (current != null && _playbackPosition.value in 0 until QUICK_SKIP_WINDOW_MS) {
+            viewModelScope.launch {
+                repository.recordQuickSkip(current)
+            }
+        }
         mediaController?.seekToNext()
     }
 

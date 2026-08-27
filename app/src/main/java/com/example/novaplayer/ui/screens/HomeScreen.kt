@@ -20,6 +20,9 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -32,6 +35,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.example.novaplayer.data.local.SongEntity
+import com.example.novaplayer.AppLanguage
 import androidx.compose.ui.res.stringResource
 import com.example.novaplayer.R
 import com.example.novaplayer.theme.*
@@ -41,11 +45,13 @@ import com.example.novaplayer.ui.viewmodel.MusicViewModel
 @Composable
 fun HomeScreen(
     viewModel: MusicViewModel,
-    onNavigateToSearch: () -> Unit
+    onNavigateToSearch: () -> Unit,
+    onLanguageSelected: (String) -> Unit
 ) {
     val recentlyPlayedSongs by viewModel.recentlyPlayedSongs.collectAsState()
     val favoriteSongs by viewModel.favoriteSongs.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
+    var languageMenuExpanded by remember { mutableStateOf(false) }
 
     val categories = listOf("Electronic", "Hip-Hop", "Lo-Fi", "Rock", "Ambient", "Chill")
 
@@ -71,18 +77,61 @@ fun HomeScreen(
                     fontWeight = FontWeight.Bold,
                     letterSpacing = 3.sp
                 )
-                IconButton(
-                    onClick = { viewModel.setDriveMode(true) },
-                    modifier = Modifier
-                        .background(CyberSurface, CircleShape)
-                        .border(1.dp, NeonOrange.copy(alpha = 0.6f), CircleShape)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.DirectionsCar,
-                        contentDescription = stringResource(R.string.drive_mode_desc),
-                        tint = NeonOrange,
-                        modifier = Modifier.size(20.dp)
-                    )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Box {
+                        IconButton(
+                            onClick = { languageMenuExpanded = true },
+                            modifier = Modifier
+                                .background(CyberSurface, CircleShape)
+                                .border(1.dp, NeonPurple.copy(alpha = 0.6f), CircleShape)
+                        ) {
+                            Text(
+                                text = "EN",
+                                color = NeonPurple,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        DropdownMenu(
+                            expanded = languageMenuExpanded,
+                            onDismissRequest = { languageMenuExpanded = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.language_system)) },
+                                onClick = {
+                                    languageMenuExpanded = false
+                                    onLanguageSelected(AppLanguage.SYSTEM)
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.language_english)) },
+                                onClick = {
+                                    languageMenuExpanded = false
+                                    onLanguageSelected(AppLanguage.ENGLISH)
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.language_turkish)) },
+                                onClick = {
+                                    languageMenuExpanded = false
+                                    onLanguageSelected(AppLanguage.TURKISH)
+                                }
+                            )
+                        }
+                    }
+                    IconButton(
+                        onClick = { viewModel.setDriveMode(true) },
+                        modifier = Modifier
+                            .background(CyberSurface, CircleShape)
+                            .border(1.dp, NeonOrange.copy(alpha = 0.6f), CircleShape)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.DirectionsCar,
+                            contentDescription = stringResource(R.string.drive_mode_desc),
+                            tint = NeonOrange,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
                 }
             }
         }

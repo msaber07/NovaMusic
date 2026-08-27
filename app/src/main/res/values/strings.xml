@@ -1,5 +1,10 @@
 <resources>
     <string name="app_name">NovaMusic</string>
+    <string name="language_desc">Language</string>
+    <string name="language_system">System default</string>
+    <string name="language_english">English</string>
+    <string name="language_turkish">Türkçe</string>
+    <string name="clear_desc">Clear</string>
     <string name="discover_nova">DISCOVER NOVA</string>
     <string name="drive_mode_desc">Drive Mode</string>
     <string name="select_genre">SELECT GENRE</string>

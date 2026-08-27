@@ -6,6 +6,7 @@ import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.DefaultDataSource
@@ -62,6 +63,27 @@ class PlaybackService : MediaLibraryService() {
     private val serviceScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
     private val librarySessionCallback = object : MediaLibrarySession.Callback {
+
+        /**
+         * Android Auto can connect as an untrusted Media3 controller. The default
+         * connection policy gives those controllers browse-only access, which
+         * leaves the car UI without play/pause or previous/next controls even
+         * though the library itself is visible. Expose the commands that the
+         * backing ExoPlayer currently supports so Media3 can route them safely.
+         */
+        override fun onConnect(
+            session: MediaSession,
+            controller: MediaSession.ControllerInfo
+        ): MediaSession.ConnectionResult {
+            val playerCommands = session.player.availableCommands
+            repository.log(
+                "PlaybackService: granting ${playerCommands.size()} playback commands to " +
+                    "${controller.packageName}"
+            )
+            return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
+                .setAvailablePlayerCommands(playerCommands)
+                .build()
+        }
 
         override fun onGetLibraryRoot(
             session: MediaLibrarySession,

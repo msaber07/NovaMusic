@@ -1,5 +1,10 @@
 <resources>
     <string name="app_name">NovaMusic</string>
+    <string name="language_desc">Dil</string>
+    <string name="language_system">Sistem dili</string>
+    <string name="language_english">English</string>
+    <string name="language_turkish">Türkçe</string>
+    <string name="clear_desc">Temizle</string>
     <string name="discover_nova">NOVA KEŞFET</string>
     <string name="drive_mode_desc">Araç Modu</string>
     <string name="select_genre">TARZ SEÇİN</string>

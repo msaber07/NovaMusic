@@ -11,8 +11,9 @@ NovaMusic is a lightweight, open-source Android music player designed with a pre
 - **Neo Drive (Drive Mode):** A driving dashboard with giant touch targets, swipe gestures (drag left/right to skip tracks), and hands-free **Voice Search** (Google Speech Recognizer) to request songs instantly.
 - **My Library & Offline Playback:** Download songs directly to your device storage to listen offline (ad-free) with complete queue support.
 - **Playlist Management:** Create, customize, and edit custom playlists.
+- **Genre-Aware Smart Queue:** A versioned offline artist catalog profiles the current track by genre and language, then uses popularity-weighted random sampling to blend relevant chart-style artists, related tracks, and discovery candidates. Favourite/completed tracks raise local affinity while quick skips lower it; no listening data leaves the device.
 - **Futuristic Cyberpunk Theme:** Vibrant glassmorphic components, neon glow highlights (Cyan, Purple, Pink, Orange), and fluid animations designed for modern displays.
-- **Multi-Language Support:** Full localization for **English** (default fallback) and **Turkish** locales, detecting system language automatically.
+- **Multi-Language Support:** Full localization for **English** and **Turkish** locales, with system-language detection, an in-app language picker, and Android 13+ per-app language settings support.
 
 ---
 

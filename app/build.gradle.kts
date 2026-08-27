@@ -1,9 +1,32 @@
+import java.util.Properties
+
 plugins {
   alias(libs.plugins.android.application)
   alias(libs.plugins.compose.compiler)
   alias(libs.plugins.kotlin.serialization)
   alias(libs.plugins.ksp)
 }
+
+val keystorePropertiesFile = rootProject.file("keystore.properties")
+val keystoreProperties = Properties()
+if (keystorePropertiesFile.exists()) {
+    keystorePropertiesFile.inputStream().use { keystoreProperties.load(it) }
+}
+
+val releaseKeyAlias = keystoreProperties.getProperty("keyAlias")
+    ?: System.getenv("NOVAPLAYER_RELEASE_KEY_ALIAS")
+val releaseKeyPassword = keystoreProperties.getProperty("keyPassword")
+    ?: System.getenv("NOVAPLAYER_RELEASE_KEY_PASSWORD")
+val releaseStoreFilePath = keystoreProperties.getProperty("storeFile")
+    ?: System.getenv("NOVAPLAYER_RELEASE_STORE_FILE")
+val releaseStorePassword = keystoreProperties.getProperty("storePassword")
+    ?: System.getenv("NOVAPLAYER_RELEASE_STORE_PASSWORD")
+val hasReleaseSigning = listOf(
+    releaseKeyAlias,
+    releaseKeyPassword,
+    releaseStoreFilePath,
+    releaseStorePassword,
+).all { !it.isNullOrBlank() }
 
 android {
     namespace = "com.example.novaplayer"
@@ -12,14 +35,28 @@ android {
         applicationId = "com.example.novaplayer"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.1.0"
+    }
+
+    signingConfigs {
+        if (hasReleaseSigning) {
+            create("release") {
+                keyAlias = requireNotNull(releaseKeyAlias)
+                keyPassword = requireNotNull(releaseKeyPassword)
+                storeFile = rootProject.file(requireNotNull(releaseStoreFilePath))
+                storePassword = requireNotNull(releaseStorePassword)
+            }
+        }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
     compileOptions {

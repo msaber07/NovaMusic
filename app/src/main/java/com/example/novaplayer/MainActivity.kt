@@ -1,6 +1,7 @@
 package com.example.novaplayer
 
 import android.os.Bundle
+import android.content.Context
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -11,6 +12,10 @@ import androidx.compose.ui.Modifier
 import com.example.novaplayer.theme.NovaPlayerTheme
 
 class MainActivity : ComponentActivity() {
+  override fun attachBaseContext(newBase: Context) {
+    super.attachBaseContext(AppLanguage.wrap(newBase))
+  }
+
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
 
@@ -19,7 +24,16 @@ class MainActivity : ComponentActivity() {
         navigationBarStyle = androidx.activity.SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
     )
     setContent {
-      NovaPlayerTheme { Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) { MainNavigation() } }
+      NovaPlayerTheme {
+        Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+          MainNavigation(
+            onLanguageSelected = { languageTag ->
+              AppLanguage.set(this, languageTag)
+              recreate()
+            }
+          )
+        }
+      }
     }
   }
 }

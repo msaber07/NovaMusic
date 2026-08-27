@@ -11,7 +11,7 @@ import androidx.navigation3.ui.NavDisplay
 import com.example.novaplayer.ui.main.MainScreen
 
 @Composable
-fun MainNavigation() {
+fun MainNavigation(onLanguageSelected: (String) -> Unit) {
   val backStack = rememberNavBackStack(Main)
 
   NavDisplay(
@@ -20,7 +20,11 @@ fun MainNavigation() {
     entryProvider =
       entryProvider {
         entry<Main> {
-          MainScreen(onItemClick = { navKey -> backStack.add(navKey) }, modifier = Modifier.safeDrawingPadding().padding(16.dp))
+          MainScreen(
+            onItemClick = { navKey -> backStack.add(navKey) },
+            onLanguageSelected = onLanguageSelected,
+            modifier = Modifier.safeDrawingPadding().padding(16.dp)
+          )
         }
       },
   )

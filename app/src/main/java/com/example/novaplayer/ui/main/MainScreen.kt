@@ -43,6 +43,7 @@ import androidx.activity.compose.BackHandler
 @Composable
 fun MainScreen(
     onItemClick: (NavKey) -> Unit,
+    onLanguageSelected: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current.applicationContext
@@ -222,7 +223,11 @@ fun MainScreen(
                 .padding(innerPadding)
         ) {
             when (selectedTab) {
-                0 -> HomeScreen(viewModel = viewModel, onNavigateToSearch = { selectedTab = 1 })
+                0 -> HomeScreen(
+                    viewModel = viewModel,
+                    onNavigateToSearch = { selectedTab = 1 },
+                    onLanguageSelected = onLanguageSelected
+                )
                 1 -> SearchScreen(viewModel = viewModel)
                 2 -> LibraryScreen(viewModel = viewModel)
             }
