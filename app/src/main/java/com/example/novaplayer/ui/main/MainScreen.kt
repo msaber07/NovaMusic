@@ -21,7 +21,9 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -29,16 +31,14 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation3.runtime.NavKey
 import coil.compose.AsyncImage
-import androidx.compose.ui.res.stringResource
 import com.example.novaplayer.R
 import com.example.novaplayer.theme.*
 import com.example.novaplayer.ui.components.PlayerSheet
+import com.example.novaplayer.ui.screens.DriveModeScreen
 import com.example.novaplayer.ui.screens.HomeScreen
 import com.example.novaplayer.ui.screens.LibraryScreen
 import com.example.novaplayer.ui.screens.SearchScreen
-import com.example.novaplayer.ui.screens.DriveModeScreen
 import com.example.novaplayer.ui.viewmodel.MusicViewModel
-import androidx.activity.compose.BackHandler
 
 @Composable
 fun MainScreen(
@@ -57,7 +57,27 @@ fun MainScreen(
     val duration by viewModel.trackDuration.collectAsState()
     val isDriveMode by viewModel.isDriveMode.collectAsState()
 
-
+    // Large / automotive pane: show Drive Mode now-playing + controls.
+    // Use pane size from LocalConfiguration (already the multi-window pane size), so a
+    // narrow map+app split stays compact while a large car pane still enters Drive Mode.
+    // Blocking on isInMultiWindow alone hid now-playing on many dual-screen car setups.
+    val configuration = LocalConfiguration.current
+    val isLargeFullscreenPane =
+        (configuration.smallestScreenWidthDp >= 600 && configuration.screenWidthDp >= 840) ||
+            (configuration.screenWidthDp >= 1000 && configuration.screenHeightDp >= 560)
+    // Allow dismissing Drive Mode on a large pane without it immediately reopening.
+    var userDismissedLargeDriveMode by remember { mutableStateOf(false) }
+    LaunchedEffect(isLargeFullscreenPane, currentSong?.id) {
+        if (isLargeFullscreenPane) {
+            // Re-enter when car/phone starts playback onto this large pane.
+            if (!userDismissedLargeDriveMode) {
+                viewModel.setDriveMode(true)
+            }
+        } else {
+            userDismissedLargeDriveMode = false
+            viewModel.setDriveMode(false)
+        }
+    }
 
     Scaffold(
         bottomBar = {
@@ -244,7 +264,12 @@ fun MainScreen(
     if (isDriveMode) {
         DriveModeScreen(
             viewModel = viewModel,
-            onDismiss = { viewModel.setDriveMode(false) }
+            onDismiss = {
+                if (isLargeFullscreenPane) {
+                    userDismissedLargeDriveMode = true
+                }
+                viewModel.setDriveMode(false)
+            }
         )
     }
 }

@@ -6,6 +6,7 @@ import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultHttpDataSource
@@ -16,6 +17,9 @@ import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaLibraryService.MediaLibrarySession
 import androidx.media3.session.LibraryResult
+import androidx.media3.session.CacheBitmapLoader
+import androidx.media3.session.SimpleBitmapLoader
+import com.example.novaplayer.data.local.SongEntity
 import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor
 import androidx.media3.datasource.cache.SimpleCache
 import androidx.media3.datasource.cache.CacheDataSource
@@ -56,8 +60,12 @@ class PlaybackService : MediaLibraryService() {
         }
     }
 
-    private var player: ExoPlayer? = null
+    private var player: Player? = null
     private var mediaSession: MediaLibrarySession? = null
+
+    /** Last browsable parent Auto/car requested children for; used to expand single-item play into a queue. */
+    @Volatile
+    private var lastBrowsedParentId: String? = null
 
     private val repository by lazy { com.example.novaplayer.data.repository.MusicRepository(applicationContext) }
     private val serviceScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
@@ -65,19 +73,25 @@ class PlaybackService : MediaLibraryService() {
     private val librarySessionCallback = object : MediaLibrarySession.Callback {
 
         /**
-         * Android Auto can connect as an untrusted Media3 controller. The default
-         * connection policy gives those controllers browse-only access, which
-         * leaves the car UI without play/pause or previous/next controls even
-         * though the library itself is visible. Expose the commands that the
-         * backing ExoPlayer currently supports so Media3 can route them safely.
+         * Android Auto / car dual-screen UIs often connect as untrusted Media3
+         * controllers. The default policy can leave them browse-only.
+         *
+         * Important: do NOT grant session.player.availableCommands here. That
+         * snapshot is frozen for the life of the connection. If Auto connects
+         * before a multi-item queue is loaded, COMMAND_SEEK_TO_NEXT /
+         * COMMAND_SEEK_TO_PREVIOUS are missing and never reappear — so the car
+         * UI only shows play/pause. Grant DEFAULT_PLAYER_COMMANDS (which
+         * includes skip next/previous); Media3 intersects them with the
+         * player's live availableCommands as the queue changes.
          */
         override fun onConnect(
             session: MediaSession,
             controller: MediaSession.ControllerInfo
         ): MediaSession.ConnectionResult {
-            val playerCommands = session.player.availableCommands
+            val playerCommands = MediaSession.ConnectionResult.DEFAULT_PLAYER_COMMANDS
             repository.log(
-                "PlaybackService: granting ${playerCommands.size()} playback commands to " +
+                "PlaybackService: granting DEFAULT player commands (" +
+                    "${playerCommands.size()}, includes skip next/previous) to " +
                     "${controller.packageName}"
             )
             return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
@@ -219,6 +233,9 @@ class PlaybackService : MediaLibraryService() {
                             }
                         }
                     }
+                    if (parentId == "favorites" || parentId == "downloads" || parentId.startsWith("playlist_")) {
+                        lastBrowsedParentId = parentId
+                    }
                     future.set(LibraryResult.ofItemList(ImmutableList.copyOf(items), params))
                 } catch (e: Exception) {
                     future.set(LibraryResult.ofError(LibraryResult.RESULT_ERROR_UNKNOWN))
@@ -268,46 +285,166 @@ class PlaybackService : MediaLibraryService() {
             val future = SettableFuture.create<MutableList<MediaItem>>()
             serviceScope.launch {
                 val resolvedItems = withContext(Dispatchers.IO) {
-                    val list = mutableListOf<MediaItem>()
-                    for (item in mediaItems) {
-                        val uri = item.localConfiguration?.uri?.toString()
-                        val isResolved = !uri.isNullOrEmpty()
-                        if (isResolved) {
-                            list.add(item)
-                        } else {
-                            val songId = item.mediaId
-                            val dbSong = repository.getSongByIdSync(songId)
-                            val playUri = if (dbSong?.isDownloaded == true && dbSong.localUri != null) {
-                                repository.log("PlaybackService: Playing downloaded local file: ${dbSong.localUri}")
-                                if (dbSong.localUri.startsWith("/")) {
-                                    "file://${dbSong.localUri}"
-                                } else {
-                                    dbSong.localUri
-                                }
-                            } else {
-                                if (songId.startsWith("yt_")) {
-                                    "youtube://$songId"
-                                } else {
-                                    ""
-                                }
-                            }
-                            if (playUri.isNotEmpty()) {
-                                list.add(
-                                    item.buildUpon()
-                                        .setUri(android.net.Uri.parse(playUri))
-                                        .build()
-                                )
-                            } else {
-                                list.add(item)
-                            }
-                        }
-                    }
-                    list
+                    resolveMediaItemsList(mediaItems)
                 }
                 future.set(resolvedItems)
             }
             return future
         }
+
+        /**
+         * Android Auto / car hosts request a SINGLE browsed item. Without expanding
+         * that into the parent folder playlist, ExoPlayer has a 1-item timeline and
+         * next/previous controls stay hidden — even when DEFAULT_PLAYER_COMMANDS and
+         * AlwaysSkipEnabledPlayer advertise skip. Phone-start works because
+         * MusicViewModel.play() already sets a full queue.
+         */
+        @OptIn(UnstableApi::class)
+        override fun onSetMediaItems(
+            mediaSession: MediaSession,
+            controller: MediaSession.ControllerInfo,
+            mediaItems: List<MediaItem>,
+            startIndex: Int,
+            startPositionMs: Long
+        ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> {
+            val future = SettableFuture.create<MediaSession.MediaItemsWithStartPosition>()
+            serviceScope.launch {
+                try {
+                    val result = withContext(Dispatchers.IO) {
+                        if (mediaItems.size == 1) {
+                            val requested = mediaItems.first()
+                            val parentId = findParentContainingSong(requested.mediaId)
+                            if (parentId != null) {
+                                val songs = loadSongsForParent(parentId)
+                                if (songs.isNotEmpty()) {
+                                    val playlist = songs.map { songToMediaItem(it) }
+                                    val index = songs.indexOfFirst { it.id == requested.mediaId }
+                                        .coerceAtLeast(0)
+                                    repository.log(
+                                        "PlaybackService: onSetMediaItems expanded ${requested.mediaId} " +
+                                            "via parent=$parentId to ${playlist.size} items, " +
+                                            "startIndex=$index (from ${controller.packageName})"
+                                    )
+                                    return@withContext MediaSession.MediaItemsWithStartPosition(
+                                        playlist,
+                                        index,
+                                        startPositionMs
+                                    )
+                                }
+                            }
+                        }
+                        val resolved = resolveMediaItemsList(mediaItems)
+                        repository.log(
+                            "PlaybackService: onSetMediaItems resolved ${resolved.size} item(s), " +
+                                "startIndex=$startIndex (from ${controller.packageName})"
+                        )
+                        MediaSession.MediaItemsWithStartPosition(
+                            resolved,
+                            startIndex,
+                            startPositionMs
+                        )
+                    }
+                    future.set(result)
+                } catch (e: Exception) {
+                    repository.log("PlaybackService: onSetMediaItems failed: ${e.message}")
+                    future.setException(e)
+                }
+            }
+            return future
+        }
+    }
+
+    private suspend fun loadSongsForParent(parentId: String): List<SongEntity> {
+        return when {
+            parentId == "favorites" -> repository.getFavoriteSongsFlow().first()
+            parentId == "downloads" -> repository.getDownloadedSongsFlow().first()
+            parentId.startsWith("playlist_") -> {
+                val playlistId = parentId.removePrefix("playlist_")
+                repository.getPlaylistWithSongsFlow(playlistId).first()?.songs ?: emptyList()
+            }
+            else -> emptyList()
+        }
+    }
+
+    private suspend fun findParentContainingSong(songId: String): String? {
+        lastBrowsedParentId?.let { parent ->
+            val songs = loadSongsForParent(parent)
+            if (songs.any { it.id == songId }) return parent
+        }
+        if (repository.getFavoriteSongsFlow().first().any { it.id == songId }) {
+            return "favorites"
+        }
+        if (repository.getDownloadedSongsFlow().first().any { it.id == songId }) {
+            return "downloads"
+        }
+        val playlists = repository.getAllPlaylistsFlow().first()
+        for (playlist in playlists) {
+            val withSongs = repository.getPlaylistWithSongsFlow(playlist.playlistId).first()
+            if (withSongs?.songs?.any { it.id == songId } == true) {
+                return "playlist_${playlist.playlistId}"
+            }
+        }
+        return null
+    }
+
+    private fun resolvePlayUri(song: SongEntity): String {
+        return if (song.isDownloaded && song.localUri != null) {
+            repository.log("PlaybackService: Playing downloaded local file: ${song.localUri}")
+            if (song.localUri.startsWith("/")) {
+                "file://${song.localUri}"
+            } else {
+                song.localUri
+            }
+        } else if (song.id.startsWith("yt_")) {
+            "youtube://${song.id}"
+        } else if (song.audioUrl.isNotEmpty()) {
+            song.audioUrl
+        } else {
+            ""
+        }
+    }
+
+    private fun songToMediaItem(song: SongEntity): MediaItem {
+        val builder = MediaItem.Builder()
+            .setMediaId(song.id)
+            .setMediaMetadata(
+                MediaMetadata.Builder()
+                    .setTitle(song.title)
+                    .setArtist(song.artistName)
+                    .setArtworkUri(song.albumImageUrl?.let { Uri.parse(it) })
+                    .setFolderType(MediaMetadata.FOLDER_TYPE_NONE)
+                    .setIsPlayable(true)
+                    .build()
+            )
+        val playUri = resolvePlayUri(song)
+        if (playUri.isNotEmpty()) {
+            builder.setUri(Uri.parse(playUri))
+        }
+        return builder.build()
+    }
+
+    private fun resolveMediaItemsList(mediaItems: List<MediaItem>): MutableList<MediaItem> {
+        val list = mutableListOf<MediaItem>()
+        for (item in mediaItems) {
+            val uri = item.localConfiguration?.uri?.toString()
+            if (!uri.isNullOrEmpty()) {
+                list.add(item)
+                continue
+            }
+            val songId = item.mediaId
+            val dbSong = repository.getSongByIdSync(songId)
+            if (dbSong != null) {
+                list.add(songToMediaItem(dbSong))
+            } else {
+                val playUri = if (songId.startsWith("yt_")) "youtube://$songId" else ""
+                if (playUri.isNotEmpty()) {
+                    list.add(item.buildUpon().setUri(Uri.parse(playUri)).build())
+                } else {
+                    list.add(item)
+                }
+            }
+        }
+        return list
     }
 
     @OptIn(UnstableApi::class)
@@ -334,11 +471,14 @@ class PlaybackService : MediaLibraryService() {
         val mediaSourceFactory = DefaultMediaSourceFactory(this)
             .setDataSourceFactory(resolvingDataSourceFactory)
 
-        player = ExoPlayer.Builder(this)
+        val exoPlayer = ExoPlayer.Builder(this)
             .setAudioAttributes(audioAttributes, true)
             .setHandleAudioBecomingNoisy(true)
             .setMediaSourceFactory(mediaSourceFactory)
             .build()
+        // Advertise skip next/previous to car / notification controllers even when
+        // ExoPlayer would temporarily hide them (e.g. single-item or end-of-queue).
+        player = AlwaysSkipEnabledPlayer(exoPlayer)
 
         player?.addListener(object : androidx.media3.common.Player.Listener {
             override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
@@ -381,6 +521,8 @@ class PlaybackService : MediaLibraryService() {
         player?.let { p ->
             mediaSession = MediaLibrarySession.Builder(this, p, librarySessionCallback)
                 .setSessionActivity(pendingIntent)
+                // Load remote artwork so Android Auto / car now-playing shows cover art.
+                .setBitmapLoader(CacheBitmapLoader(SimpleBitmapLoader()))
                 .build()
         }
     }
@@ -407,6 +549,66 @@ class PlaybackService : MediaLibraryService() {
             mediaSession = null
         }
         super.onDestroy()
+    }
+}
+
+/**
+ * Keeps ACTION_SKIP_TO_NEXT / ACTION_SKIP_TO_PREVIOUS visible to Android Auto and
+ * other MediaSession controllers. ExoPlayer only exposes those commands when a
+ * neighboring queue item exists; car UIs then hide the buttons. This wrapper
+ * always advertises them and routes to the real queue skip (or restart).
+ */
+@OptIn(UnstableApi::class)
+private class AlwaysSkipEnabledPlayer(
+    private val exoPlayer: ExoPlayer
+) : ForwardingPlayer(exoPlayer) {
+
+    override fun getAvailableCommands(): Player.Commands {
+        return super.getAvailableCommands()
+            .buildUpon()
+            .add(Player.COMMAND_SEEK_TO_NEXT)
+            .add(Player.COMMAND_SEEK_TO_PREVIOUS)
+            .add(Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM)
+            .add(Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM)
+            .build()
+    }
+
+    override fun isCommandAvailable(@Player.Command command: Int): Boolean {
+        return availableCommands.contains(command)
+    }
+
+    override fun seekToNext() {
+        if (hasNextMediaItem()) {
+            seekToNextMediaItem()
+        }
+    }
+
+    override fun seekToPrevious() {
+        if (isCommandAvailable(Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM) &&
+            currentPosition > PREV_RESTART_THRESHOLD_MS
+        ) {
+            seekTo(0)
+        } else if (hasPreviousMediaItem()) {
+            seekToPreviousMediaItem()
+        } else if (isCommandAvailable(Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM)) {
+            seekTo(0)
+        }
+    }
+
+    override fun seekToNextMediaItem() {
+        if (hasNextMediaItem()) {
+            exoPlayer.seekToNextMediaItem()
+        }
+    }
+
+    override fun seekToPreviousMediaItem() {
+        if (hasPreviousMediaItem()) {
+            exoPlayer.seekToPreviousMediaItem()
+        }
+    }
+
+    private companion object {
+        const val PREV_RESTART_THRESHOLD_MS = 3000L
     }
 }
 
